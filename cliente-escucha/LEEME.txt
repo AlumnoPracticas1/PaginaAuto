@@ -1,0 +1,93 @@
+==================================================================
+ cliente-escucha — instalación en cualquier web
+==================================================================
+
+Esto es lo que hay que copiar en otra página para que el orquestador
+(http://127.0.0.1:8000) la "escuche":
+
+   1. error_capture.js   ← captura errores JS, fetch, recursos y CSS
+   2. mensajes.js        ← (opcional) traduce los mensajes a tus palabras
+
+
+------------------------------------------------------------------
+PASO 1 — copiar los archivos
+------------------------------------------------------------------
+Copia error_capture.js y mensajes.js a la raíz de la web cliente
+(o donde sirva sus assets estáticos).
+
+
+------------------------------------------------------------------
+PASO 2 — pegar esto en el <head> de cada HTML
+------------------------------------------------------------------
+
+   <!-- nombre con el que aparecerá en "Clientes conectados" -->
+   <script>
+     window.APP_NAME    = 'mi-web';            // cambia esto
+     window.APP_RELEASE = '1.0.0';             // opcional
+   </script>
+
+   <!-- mensajes personalizados (opcional) -->
+   <script src="mensajes.js"></script>
+
+   <!-- captura de errores -->
+   <script src="error_capture.js"
+           data-endpoint="http://127.0.0.1:8000"></script>
+
+
+Notas:
+- Si la web cliente y el orquestador están en la misma máquina,
+  data-endpoint="http://127.0.0.1:8000" es lo correcto.
+- Si están en máquinas distintas, pon la IP/host del orquestador.
+- El script debe ir lo más arriba posible del <head> para capturar
+  errores tempranos.
+
+
+------------------------------------------------------------------
+PASO 3 — comprobar
+------------------------------------------------------------------
+1. Abre la web cliente.
+2. F12 → Network → debe verse un POST a /hello con status 200.
+3. Abre el dashboard http://127.0.0.1:8000/ → "Clientes conectados".
+   Tu APP_NAME debe aparecer en la lista.
+
+
+==================================================================
+ PERSONALIZAR LOS MENSAJES DE ERROR
+==================================================================
+
+Abre mensajes.js y edita la lista MENSAJES_PERSONALIZADOS. Cada
+entrada tiene:
+
+   { match: <string o RegExp>, replace: <string> }
+
+Ejemplos:
+
+   // sustituir un substring literal
+   { match: 'NetworkError', replace: 'Sin conexión' },
+
+   // sustituir con expresión regular y capturar grupos ($1, $2)
+   { match: /Cannot read properties of undefined .*'([^']+)'/i,
+     replace: 'Falta el dato "$1"' },
+
+La regla se aplica ANTES de enviar al orquestador, así que en el
+dashboard ya verás el texto traducido. Si ninguna regla coincide,
+se envía el mensaje original tal cual.
+
+Para añadir reglas: edita mensajes.js y recarga la página cliente
+con Ctrl+Shift+R (para saltar caché).
+
+
+==================================================================
+ ¿QUÉ SE CAPTURA?
+==================================================================
+
+- Errores JS sin tratar (window.onerror)
+- Promesas rechazadas (unhandledrejection)
+- Recursos fallidos (<img>, <script>, <link>)
+- Respuestas fetch con status 4xx/5xx y fallos de red
+- Propiedades CSS inválidas en hojas same-origin
+
+Cada error se manda a POST /report con:
+   { source, message, file, line, stack, extra: { app, ... } }
+
+==================================================================

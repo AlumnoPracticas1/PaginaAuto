@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -X POST http://127.0.0.1:8000/hello -H \"Content-Type: application/json\" -d \"{\\\\\"app\\\\\":\\\\\"avantservice\\\\\",\\\\\"url\\\\\":\\\\\"http://localhost:5500/\\\\\",\\\\\"user_agent\\\\\":\\\\\"curl-test\\\\\"}\")",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(c['app'],'->',[p['url'] for p in c['pages']]\\) for c in data]\")"
+    ]
+  }
+}
