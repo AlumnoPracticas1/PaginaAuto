@@ -140,6 +140,10 @@ ${rules.map(banToJsLiteral).join(',\n')}
     if (disparados.has(clave)) return; disparados.add(clave);
     var msg = regla.mensaje || ('palabra-prohibida: ' + regla.etiqueta);
     var detalle = msg + ' (campo "' + (campo || '?') + '", valor "' + String(valor).slice(0, 80) + '")';
+    // Preferir POST silencioso via error_capture; throw solo si no esta cargado
+    if (typeof window.AVISOS_REPORTAR === 'function') {
+      try { window.AVISOS_REPORTAR(detalle, { kind: 'palabra-prohibida', regla: regla.etiqueta, campo: campo }); return; } catch (e) {}
+    }
     setTimeout(function () { throw new Error(detalle); }, 0);
   }
   function inspeccionar(el) {
@@ -173,6 +177,28 @@ function writeExtJs(c) {
 (function () {
   var CFG = ${cfg};
 
+  // ---- resolver endpoint exacto del orquestador ----
+  function resolveBase() {
+    try {
+      if (window.AVANTSERVICE_ENDPOINT) return String(window.AVANTSERVICE_ENDPOINT).replace(/\\/$/, '');
+      var scripts = document.getElementsByTagName('script');
+      for (var i = 0; i < scripts.length; i++) {
+        var ds = scripts[i].getAttribute && scripts[i].getAttribute('data-endpoint');
+        if (ds) return String(ds).replace(/\\/$/, '');
+      }
+    } catch (e) {}
+    var p = (location.protocol === 'https:') ? 'https:' : 'http:';
+    return p + '//' + (location.hostname || '127.0.0.1') + ':8000';
+  }
+  var BASE = resolveBase();
+  var REPORT_URL = BASE + '/report';
+  function esNuestroReport(u) {
+    if (typeof u !== 'string') return false;
+    var idx = u.indexOf('?');
+    var clean = idx >= 0 ? u.slice(0, idx) : u;
+    return clean === REPORT_URL;
+  }
+
   // ---- throttle global ----
   var ventana = [];
   function permitido() {
@@ -202,7 +228,7 @@ function writeExtJs(c) {
     window.fetch = function (input, init) {
       try {
         var u = (input && input.url) || input;
-        if (typeof u === 'string' && /\\/report(\\?|$)/.test(u) && init && init.body) {
+        if (esNuestroReport(u) && init && init.body) {
           var body = init.body;
           if (typeof body === 'string') {
             var p = JSON.parse(body);
@@ -222,7 +248,17 @@ function writeExtJs(c) {
 
   function reportar(msg) {
     if (debeIgnorar(msg) || !permitido()) return;
-    setTimeout(function () { throw new Error(String(msg)); }, 0);
+    var s = String(msg);
+    // Preferir el helper limpio de error_capture.js (POST silencioso, no
+    // ensucia la consola del cliente ni dispara su window.onerror)
+    var helper = window.__AVISOS_REPORTAR_NATIVE;
+    if (typeof helper === 'function') { try { helper(s, { kind: 'extension' }); return; } catch (e) {} }
+    setTimeout(function () { throw new Error(s); }, 0);
+  }
+  // Guardamos la version "limpia" de error_capture antes de exponer la nuestra,
+  // para que sea esa la que usemos por debajo y no entrar en recursion.
+  if (typeof window.AVISOS_REPORTAR === 'function' && !window.__AVISOS_REPORTAR_NATIVE) {
+    window.__AVISOS_REPORTAR_NATIVE = window.AVISOS_REPORTAR;
   }
   window.AVISOS_REPORTAR = reportar;
 
@@ -521,19 +557,27 @@ function cmdBuild() {
   [RULES_JS, BAN_JS, EXT_JS].forEach(f => console.log('  ' + f));
 }
 function cmdInstalar() {
+  console.log('IMPORTANTE: copia los .js a la raiz de la web cliente (auto-hospedar).');
+  console.log('Si los sirves desde el orquestador y este cae, el navegador puede');
+  console.log('bloquear el render de la pagina hasta agotar el timeout TCP.');
+  console.log('');
   console.log('Pega esto en el <head> de cada HTML de la web cliente:');
   console.log('');
   console.log('  <script>');
   console.log("    window.APP_NAME    = 'mi-web';     // cambia esto");
   console.log("    window.APP_RELEASE = '1.0.0';      // opcional");
   console.log('  </script>');
-  console.log('  <script src="mensajes.js"></script>');
-  console.log('  <script src="avisos-personalizados.js"></script>');
-  console.log('  <script src="error_capture.js" data-endpoint="http://127.0.0.1:8000"></script>');
-  console.log('  <script src="palabras-prohibidas.js"></script>');
-  console.log('  <script src="extensiones-cliente.js"></script>');
+  console.log('  <script src="mensajes.js"               defer></script>');
+  console.log('  <script src="avisos-personalizados.js"  defer></script>');
+  console.log('  <script src="error_capture.js"          defer');
+  console.log('          data-endpoint="http://127.0.0.1:8000"></script>');
+  console.log('  <script src="palabras-prohibidas.js"    defer></script>');
+  console.log('  <script src="extensiones-cliente.js"    defer></script>');
   console.log('');
-  console.log('(orden importante: extensiones y palabras prohibidas van DESPUES de error_capture)');
+  console.log('Notas:');
+  console.log('  - "defer" garantiza que NO bloquean el render aunque el host tarde.');
+  console.log('  - El orden se respeta automaticamente con defer (ejecutan en orden).');
+  console.log('  - extensiones y palabras prohibidas van DESPUES de error_capture.');
 }
 
 // =============== helpers de comando ===============

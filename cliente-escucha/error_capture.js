@@ -103,6 +103,22 @@
     post(ENDPOINT, payload);
   }
 
+  // --- Helper publico para que otros scripts reporten sin tirar errores
+  // a la consola del cliente. Si esta funcion existe, palabras-prohibidas
+  // y extensiones-cliente la usan en lugar de `setTimeout(throw)`.
+  window.AVISOS_REPORTAR = function (msg, extra) {
+    try {
+      send({
+        source: SOURCE,
+        message: String(msg == null ? '' : msg),
+        file: relPath(location.href),
+        line: 0,
+        stack: null,
+        extra: Object.assign({ kind: 'manual' }, extra || {})
+      });
+    } catch (e) {}
+  };
+
   // --- Registro como cliente ---------------------------------------
   post(HELLO_ENDPOINT, {
     app: APP_NAME,

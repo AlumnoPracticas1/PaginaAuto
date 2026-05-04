@@ -3,6 +3,28 @@
 (function () {
   var CFG = {"obligatorios":[],"longitudes":[],"patrones":[],"ignorados":[],"consola":{"error":false,"warn":false},"throttle":{"porMinuto":0},"uiChecks":{"botonesDisabled":false,"linksVacios":false},"etiqueta":null};
 
+  // ---- resolver endpoint exacto del orquestador ----
+  function resolveBase() {
+    try {
+      if (window.AVANTSERVICE_ENDPOINT) return String(window.AVANTSERVICE_ENDPOINT).replace(/\/$/, '');
+      var scripts = document.getElementsByTagName('script');
+      for (var i = 0; i < scripts.length; i++) {
+        var ds = scripts[i].getAttribute && scripts[i].getAttribute('data-endpoint');
+        if (ds) return String(ds).replace(/\/$/, '');
+      }
+    } catch (e) {}
+    var p = (location.protocol === 'https:') ? 'https:' : 'http:';
+    return p + '//' + (location.hostname || '127.0.0.1') + ':8000';
+  }
+  var BASE = resolveBase();
+  var REPORT_URL = BASE + '/report';
+  function esNuestroReport(u) {
+    if (typeof u !== 'string') return false;
+    var idx = u.indexOf('?');
+    var clean = idx >= 0 ? u.slice(0, idx) : u;
+    return clean === REPORT_URL;
+  }
+
   // ---- throttle global ----
   var ventana = [];
   function permitido() {
@@ -32,7 +54,7 @@
     window.fetch = function (input, init) {
       try {
         var u = (input && input.url) || input;
-        if (typeof u === 'string' && /\/report(\?|$)/.test(u) && init && init.body) {
+        if (esNuestroReport(u) && init && init.body) {
           var body = init.body;
           if (typeof body === 'string') {
             var p = JSON.parse(body);
@@ -52,7 +74,17 @@
 
   function reportar(msg) {
     if (debeIgnorar(msg) || !permitido()) return;
-    setTimeout(function () { throw new Error(String(msg)); }, 0);
+    var s = String(msg);
+    // Preferir el helper limpio de error_capture.js (POST silencioso, no
+    // ensucia la consola del cliente ni dispara su window.onerror)
+    var helper = window.__AVISOS_REPORTAR_NATIVE;
+    if (typeof helper === 'function') { try { helper(s, { kind: 'extension' }); return; } catch (e) {} }
+    setTimeout(function () { throw new Error(s); }, 0);
+  }
+  // Guardamos la version "limpia" de error_capture antes de exponer la nuestra,
+  // para que sea esa la que usemos por debajo y no entrar en recursion.
+  if (typeof window.AVISOS_REPORTAR === 'function' && !window.__AVISOS_REPORTAR_NATIVE) {
+    window.__AVISOS_REPORTAR_NATIVE = window.AVISOS_REPORTAR;
   }
   window.AVISOS_REPORTAR = reportar;
 

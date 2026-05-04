@@ -226,15 +226,21 @@ Bonus) Regenerar todos los .js desde los JSON
 Orden de carga recomendado en el <head>
 ------------------------------------------------------------------
    <script>window.APP_NAME = 'mi-web';</script>
-   <script src="mensajes.js"></script>
-   <script src="avisos-personalizados.js"></script>
-   <script src="error_capture.js"
+   <script src="mensajes.js"               defer></script>
+   <script src="avisos-personalizados.js"  defer></script>
+   <script src="error_capture.js"          defer
            data-endpoint="http://127.0.0.1:8000"></script>
-   <script src="palabras-prohibidas.js"></script>
-   <script src="extensiones-cliente.js"></script>
+   <script src="palabras-prohibidas.js"    defer></script>
+   <script src="extensiones-cliente.js"    defer></script>
 
 `extensiones-cliente.js` engancha al fetch que usa error_capture.js,
 asi que tiene que ir DESPUES.
+
+IMPORTANTE: usa `defer` y AUTO-HOSPEDA estos .js en la raiz de tu web.
+Si los sirves desde el orquestador y este cae, el navegador puede
+bloquear el render de la pagina hasta el timeout TCP. Con `defer`
+y los .js en tu propio dominio, el orquestador es 100% opcional
+para que tu pagina cargue.
 
 Aviso para Git Bash: si pasas /regex/flags como argumento, Git Bash
 puede convertirlo en una ruta Windows. Usa  MSYS_NO_PATHCONV=1  o

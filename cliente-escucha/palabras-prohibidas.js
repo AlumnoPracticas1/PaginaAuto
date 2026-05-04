@@ -19,6 +19,10 @@
     if (disparados.has(clave)) return; disparados.add(clave);
     var msg = regla.mensaje || ('palabra-prohibida: ' + regla.etiqueta);
     var detalle = msg + ' (campo "' + (campo || '?') + '", valor "' + String(valor).slice(0, 80) + '")';
+    // Preferir POST silencioso via error_capture; throw solo si no esta cargado
+    if (typeof window.AVISOS_REPORTAR === 'function') {
+      try { window.AVISOS_REPORTAR(detalle, { kind: 'palabra-prohibida', regla: regla.etiqueta, campo: campo }); return; } catch (e) {}
+    }
     setTimeout(function () { throw new Error(detalle); }, 0);
   }
   function inspeccionar(el) {
