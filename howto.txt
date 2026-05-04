@@ -1,0 +1,525 @@
+==================================================================
+ PAGINAAUTO — howto.txt
+ Guia detallada de principio a fin: que es, como arranca, como
+ fluyen los datos, que hace cada pieza y como se opera.
+==================================================================
+
+INDICE
+  1. Que es PaginaAuto
+  2. Arquitectura general (4 procesos)
+  3. Estructura de carpetas
+  4. Requisitos
+  5. Primer arranque (paso a paso)
+  6. Arranque normal (todolisto.bat)
+  7. Flujo end-to-end de un error
+  8. Backend Node (puerto 4000) — endpoints
+  9. Pipeline IA Python (puerto 8000) — main.py
+ 10. Frontend React (puerto 5173) — vistas
+ 11. cliente-escucha — el script que se pega en cada web
+ 12. Base de datos MySQL — tablas
+ 13. Configuracion y variables de entorno
+ 14. Seguridad (token, CORS, sanitizacion)
+ 15. Resiliencia (timeouts, cola offline, dedupe)
+ 16. Operacion diaria (aprobar, rechazar, resolver)
+ 17. Troubleshooting
+ 18. Glosario
+
+
+------------------------------------------------------------------
+ 1. QUE ES PAGINAAUTO
+------------------------------------------------------------------
+PaginaAuto es un orquestador de errores con tres roles:
+
+  - Recibe errores en tiempo real desde cualquier web cliente
+    (PHP, JS, recursos, CSS, validaciones humanas).
+  - Los pasa por un pipeline IA (Ollama / Claude / GPT) que
+    propone parches o mensajes amigables y los clasifica por
+    prioridad.
+  - Muestra las propuestas en un dashboard donde una persona
+    aprueba, rechaza o ignora; al aprobar, escribe el fix en
+    el archivo real (con backup automatico).
+
+Es el sucesor de "Pagina automatizacion/dashboard.html" + main.py.
+La logica IA sigue en main.py; la UI y la API web son nuevas.
+
+
+------------------------------------------------------------------
+ 2. ARQUITECTURA GENERAL (4 procesos)
+------------------------------------------------------------------
+
+  +----------------------+        +-----------------------+
+  | Web cliente cualquier|        | Frontend React (Vite) |
+  | (incluye             |        |  http://localhost:5173|
+  |  error_capture.js)   |        +-----------+-----------+
+  +-----+----------------+                    |
+        | POST /report, /hello                | /api/* (proxy)
+        | (X-Client-Token opcional)           v
+        |                          +----------+-----------+
+        |                          | Backend Node Express |
+        |        ---- /report ---->|  http://localhost:4000|
+        |        (tambien acepta)  +----+--------------+--+
+        |                               |              |
+        v                               | proxy IA     | MySQL
+  +-----+------------------+            v              v
+  | Pipeline IA (FastAPI)  |  +---------+----------+  +---------+
+  |  http://127.0.0.1:8000 |<-+ pyFetch (axios)    |  | WAMP    |
+  |  main.py               |  +--------------------+  | :3306   |
+  +------------------------+                          +---------+
+
+Procesos que corren a la vez:
+  P1) main.py            FastAPI    :8000   pipeline IA + /report+/hello
+  P2) backend Node       Express    :4000   API web + persistencia MySQL
+  P3) frontend Vite      Vite dev   :5173   dashboard React
+  P4) avantservice       http.server:5500   sitio estatico de demo (opcional)
+
+Notas:
+- El cliente-escucha apunta normalmente a :8000 (main.py) porque ahi
+  estan /report y /hello del pipeline original. El backend Node
+  tambien expone /report para flujos donde se quiera persistir
+  primero en MySQL y luego pedirle a Python que clasifique.
+- El frontend nunca habla con Python directamente: pasa por Node.
+
+
+------------------------------------------------------------------
+ 3. ESTRUCTURA DE CARPETAS
+------------------------------------------------------------------
+
+HAM/
+├─ Pagina automatizacion/        proyecto original
+│   ├─ main.py                   FastAPI: pipeline IA + /report + /hello
+│   ├─ clients.json              registro de "Clientes conectados"
+│   ├─ previews/                 previews JSON generadas por la IA
+│   ├─ calendar_notes.json       notas legacy del calendario
+│   └─ requirements.txt
+│
+└─ PaginaAuto/                   proyecto nuevo (este repo)
+    ├─ todolisto.bat             arranca los 4 servicios y abre navegadores
+    ├─ README.md                 vision rapida
+    ├─ howto.txt                 (este archivo)
+    │
+    ├─ backend/                  API Node + MySQL
+    │   ├─ schema.sql            tablas previews, notes, chat_messages
+    │   ├─ package.json
+    │   └─ src/
+    │       ├─ server.js         entry: express + middlewares + rutas
+    │       ├─ db.js             pool MySQL
+    │       ├─ python.js         cliente HTTP a main.py (pyFetch, pyHealth)
+    │       ├─ init-db.js        crea DB y aplica schema.sql
+    │       └─ routes/
+    │           ├─ report.js     POST /report
+    │           ├─ previews.js   listar/aprobar/rechazar/resolver
+    │           ├─ notes.js      calendario CRUD
+    │           ├─ chat.js       chat IA + historial
+    │           └─ summary.js    agregados semanales
+    │
+    ├─ frontend/                 dashboard React (Vite)
+    │   ├─ index.html
+    │   ├─ vite.config.js        proxy /api -> :4000
+    │   └─ src/
+    │       ├─ main.jsx, App.jsx, api.js, styles.css
+    │       ├─ components/PreviewCard.jsx
+    │       └─ views/
+    │           ├─ Live.jsx      "Ahora mismo" (refresh 5s)
+    │           ├─ Inbox.jsx     bandeja de pendientes
+    │           ├─ Urgent.jsx    urgentes
+    │           ├─ Calendar.jsx  notas
+    │           ├─ Summary.jsx   semana
+    │           ├─ Ignored.jsx   ignorados con "Resolver ahora"
+    │           ├─ Chat.jsx      chat con las IAs
+    │           └─ Settings.jsx  estado MySQL/Python
+    │
+    └─ cliente-escucha/          se copia en CADA web cliente
+        ├─ LEEME.txt             instalacion para no-desarrolladores
+        ├─ error_capture.js      captura errores y los envia
+        ├─ mensajes.js           reglas fijas (dev): traduce mensajes
+        ├─ avisos-personalizados.js   reglas del que instala (CLI)
+        ├─ palabras-prohibidas.js     vigilancia de inputs
+        ├─ extensiones-cliente.js     obligatorios/longitudes/patrones/etc
+        ├─ avisos-cli.js              CLI de configuracion
+        └─ avisos.bat                 lanzador en Windows
+
+
+------------------------------------------------------------------
+ 4. REQUISITOS
+------------------------------------------------------------------
+- Node.js >= 20
+- Python 3.10+ con dependencias de "Pagina automatizacion/requirements.txt"
+- WAMP encendido (MySQL en :3306). Usuario por defecto: root, sin pass.
+- Puertos libres: 4000, 5173, 8000 (y 5500 si usas avantservice).
+
+
+------------------------------------------------------------------
+ 5. PRIMER ARRANQUE (paso a paso)
+------------------------------------------------------------------
+1) WAMP encendido (icono verde).
+
+2) Backend:
+     cd PaginaAuto\backend
+     copy .env.example .env       (ajusta credenciales si hace falta)
+     npm install
+     npm run init-db              (crea DB "paginaauto" y tablas)
+
+3) Frontend:
+     cd PaginaAuto\frontend
+     npm install
+
+4) Pipeline IA:
+     cd "Pagina automatizacion"
+     pip install -r requirements.txt
+
+5) (Opcional) Token compartido para cliente-escucha:
+     - Define la variable AVANTSERVICE_TOKEN antes de lanzar main.py,
+       o crea el archivo "Pagina automatizacion/.avantservice_token"
+       con el token en una linea.
+     - En cada web cliente, pega el mismo token en data-token="..." o
+       en window.AVANTSERVICE_TOKEN.
+
+6) Lanzar todo: doble click en todolisto.bat
+
+
+------------------------------------------------------------------
+ 6. ARRANQUE NORMAL (todolisto.bat)
+------------------------------------------------------------------
+todolisto.bat hace, en orden:
+  1. Si falta backend/node_modules        -> npm install
+  2. Si falta frontend/node_modules       -> npm install
+  3. Si falta backend/.env                -> copia .env.example y npm run init-db
+  4. Lanza main.py                        en una ventana (puerto 8000)
+  5. Lanza npm run dev del backend Node   en otra ventana (puerto 4000)
+  6. Lanza npm run dev del frontend Vite  en otra ventana (puerto 5173)
+  7. Si existe ../avantservice/index.html lo sirve estatico en :5500
+  8. Espera 8s y abre los navegadores (5173, 8000, 5500)
+
+Para cerrar todo: cierra cada ventana cmd. todolisto.bat NO mata
+procesos por su cuenta.
+
+
+------------------------------------------------------------------
+ 7. FLUJO END-TO-END DE UN ERROR
+------------------------------------------------------------------
+1) En la web cliente ocurre algo: excepcion JS, fetch 500,
+   <img> roto, palabra prohibida en un input, etc.
+
+2) error_capture.js (en la web cliente) construye un payload:
+       { source, message, file, line, stack, extra: { app, ... } }
+   Aplica reglas de mensajes.js / avisos-personalizados.js, sanitiza
+   (trunca, quita query/hash de URLs), deduplica por sesion y
+   manda POST con keepalive y timeout de 5s.
+
+3) Si la red falla, el payload va a una cola en sessionStorage
+   (max 50). Reintenta con backoff [2s, 8s, 30s]. Vuelve a intentar
+   automaticamente en window 'online' y 'load'.
+
+4) Si esta configurado, manda header X-Client-Token. main.py lo
+   valida si AVANTSERVICE_TOKEN esta definido (env var o archivo
+   .avantservice_token). Sin token -> 401.
+
+5) main.py recibe en /report:
+     - clasifica prioridad (urgente, alta, media, baja)
+     - si la prioridad supera AUTO_PROCESS_MIN, dispara el pipeline IA
+       (Ollama -> Claude/GPT segun configuracion); si no, guarda
+       una "preview" como pendiente.
+
+6) En paralelo (segun como este conectado el cliente), Node /report
+   tambien puede recibir la traza, hacer pyFetch a Python para
+   obtener la propuesta, e insertar la preview en MySQL.
+
+7) El frontend (Vite :5173) consulta el backend Node:
+     GET /previews?status=pending
+     GET /notifications  (urgentes)
+   La vista "Ahora mismo" refresca cada 5s.
+
+8) El operador abre una preview, ve el diff propuesto y elige:
+     - Aprobar  -> POST /previews/:id/approve
+                   Node escribe el archivo real con backup
+                   y marca la preview como applied.
+     - Rechazar -> POST /previews/:id/reject  (queda en historial)
+     - Ignorar  -> mas tarde se puede "Resolver ahora" desde Ignorados
+                   (POST /previews/:id/resolve -> reentrenamiento del
+                   pipeline para esa entrada).
+
+9) Tablas afectadas: previews, chat_messages (si se usa el chat),
+   notes (calendario). Backups van al disco con sufijo de fecha.
+
+
+------------------------------------------------------------------
+ 8. BACKEND NODE (puerto 4000) — ENDPOINTS
+------------------------------------------------------------------
+Definidos en backend/src/server.js + routes/.
+
+  GET    /health
+         Estado MySQL + Python. Lo usa la vista Settings.
+
+  GET    /previews?status=pending|applied|rejected|ignored
+  GET    /previews/:id
+  POST   /previews/:id/approve     aplica el fix (escribe archivo)
+  POST   /previews/:id/reject
+  POST   /previews/:id/resolve     reprocesa una ignorada
+
+  POST   /report                   error nuevo (proxy IA + persistencia)
+  POST   /inspect                  fuerza una pasada de inspeccion en Python
+
+  GET    /notifications            urgentes pendientes (max 20)
+
+  GET    /notes                    calendario
+  POST   /notes
+  PUT    /notes/:id
+  DELETE /notes/:id
+
+  GET    /chat/history             historial chat
+  POST   /chat                     manda prompt -> Python -> guarda
+
+  GET    /summary/weekly           agregados ultimos 7 dias
+
+CORS abierto. Limite de body: 5 MB.
+
+El proxy a Python esta en backend/src/python.js (pyFetch, pyHealth).
+La URL la marca PYTHON_API en .env (default http://localhost:8000).
+
+
+------------------------------------------------------------------
+ 9. PIPELINE IA PYTHON (puerto 8000) — main.py
+------------------------------------------------------------------
+FastAPI. Endpoints relevantes para PaginaAuto:
+
+  POST /report          recibe errores. Clasifica prioridad,
+                        consulta Ollama y/o Claude/GPT, genera
+                        preview JSON en /previews y opcionalmente
+                        escribe el fix.
+
+  POST /hello           registra un cliente en clients.json para
+                        la lista "Clientes conectados".
+
+  GET  /                dashboard legacy (HTML antiguo).
+
+  Otros: /inspect, /chat, /resolve, etc.
+
+Ambos endpoints (/report, /hello) llevan ahora la dependencia
+require_client_token. Comportamiento:
+  - Si AVANTSERVICE_TOKEN no esta definido -> modo abierto
+    (compatibilidad con instalaciones existentes).
+  - Si esta definido -> exige header X-Client-Token igual al
+    valor configurado, si no -> 401 invalid client token.
+
+Como definir el token:
+  PowerShell: $env:AVANTSERVICE_TOKEN = "mi-secreto"; python main.py
+  o crea un archivo .avantservice_token junto a main.py.
+
+Importante: un token incrustado en JS publico filtra por inspeccion.
+Sirve para frenar bots casuales, no para autenticar usuarios reales.
+Para proteccion fuerte, sirve main.py solo en LAN/VPN.
+
+
+------------------------------------------------------------------
+ 10. FRONTEND REACT (puerto 5173) — VISTAS
+------------------------------------------------------------------
+Vite con proxy: /api/* -> http://localhost:4000.
+Punto de entrada: src/main.jsx -> App.jsx -> views/*.
+
+  Live.jsx       "Ahora mismo": ultimas previews, refresh cada 5s.
+  Inbox.jsx      Bandeja: pending. Aprobar / Rechazar inline.
+  Urgent.jsx     Solo prioridad urgent.
+  Calendar.jsx   Notas con CRUD por dia.
+  Summary.jsx    Cards con totales por dia / origen / estado.
+  Ignored.jsx    Errores que el pipeline marco ignorados.
+                 Boton "Resolver ahora" -> POST /previews/:id/resolve.
+  Chat.jsx       Conversacion con la IA, historial persistido.
+  Settings.jsx   Estado MySQL + Python (a partir de /health).
+
+Componente compartido: PreviewCard.jsx — muestra un error y su
+diff propuesto, con botones de accion.
+
+
+------------------------------------------------------------------
+ 11. CLIENTE-ESCUCHA — EL SCRIPT QUE SE PEGA EN CADA WEB
+------------------------------------------------------------------
+Carpeta cliente-escucha/. Se copia en la raiz de la web cliente y
+se pega en el <head>. Detalles completos en LEEME.txt.
+
+Orden recomendado en el <head>:
+   <script>window.APP_NAME='mi-web';</script>
+   <script src="mensajes.js"               defer></script>
+   <script src="avisos-personalizados.js"  defer></script>
+   <script src="error_capture.js"          defer
+           data-endpoint="http://127.0.0.1:8000"
+           data-token="opcional"></script>
+   <script src="palabras-prohibidas.js"    defer></script>
+   <script src="extensiones-cliente.js"    defer></script>
+
+Que captura error_capture.js:
+  - Errores JS no tratados (window.onerror)
+  - Promesas rechazadas (unhandledrejection)
+  - Recursos fallidos (img/script/link)
+  - Respuestas fetch 4xx/5xx y fallos de red
+  - Propiedades CSS invalidas en hojas same-origin
+
+Caracteristicas robustas (version actual):
+  - Timeout duro 5s por POST con AbortController.
+  - Cola sessionStorage (max 50) con backoff [2s, 8s, 30s].
+  - Reintenta cuando vuelve la red ('online', 'load').
+  - Dedupe acotado a 500 entradas (evita memory leak).
+  - Sanitiza: trunca mensaje (2KB), stack (4KB), payload (32KB),
+    quita query/hash de URLs.
+  - Header X-Client-Token si esta configurado.
+  - Todo handler envuelto en try/catch -> nunca rompe la pagina.
+  - Wrapper de fetch evita bucles cuando el server esta caido.
+
+Extensiones (CLI: avisos-cli.js o avisos.bat):
+  - mensajes.js               reglas fijas del desarrollador
+  - avisos-personalizados.js  reglas del que instala (sin tocar codigo)
+  - palabras-prohibidas.js    vigila inputs/textareas
+  - extensiones-cliente.js    obligatorios, longitudes, patrones,
+                              ignorar errores conocidos, captura
+                              de console.error/warn, throttle,
+                              ui-checks, etiqueta de entorno
+
+
+------------------------------------------------------------------
+ 12. BASE DE DATOS MYSQL — TABLAS
+------------------------------------------------------------------
+DB: paginaauto. Schema en backend/schema.sql.
+
+  previews         id, source, priority, status, message, file, line,
+                   stack, diff, extra (JSON), created_at, updated_at
+  notes            id, fecha, texto, created_at
+  chat_messages    id, role, content, created_at
+
+Estados de preview:
+  pending   propuesto, esperando decision humana
+  applied   aprobado y escrito en disco
+  rejected  rechazado
+  ignored   pipeline lo marco ignorado (ruido)
+
+
+------------------------------------------------------------------
+ 13. CONFIGURACION Y VARIABLES DE ENTORNO
+------------------------------------------------------------------
+
+backend/.env:
+  PORT=4000
+  DB_HOST=127.0.0.1
+  DB_USER=root
+  DB_PASSWORD=
+  DB_NAME=paginaauto
+  PYTHON_API=http://localhost:8000
+  PHP_CODE_ROOT=C:/wamp64/www/backendstore
+  JS_CODE_ROOT=C:/Users/Lenovo/Desktop/HAM/Pagina web
+
+main.py:
+  AVANTSERVICE_TOKEN     (env var) o archivo .avantservice_token
+  AUTO_PROCESS_MIN       umbral de prioridad para auto-procesar
+  rutas de Ollama/Claude/GPT segun configuracion interna
+
+cliente-escucha (todo opcional):
+  window.APP_NAME              nombre del cliente
+  window.APP_RELEASE           version
+  window.AVANTSERVICE_ENDPOINT base del orquestador
+  window.AVANTSERVICE_TOKEN    token (o data-token="..." en el script)
+  window.MENSAJES_PERSONALIZADOS reglas extra
+
+
+------------------------------------------------------------------
+ 14. SEGURIDAD
+------------------------------------------------------------------
+Lo que esta hecho:
+  - Token compartido X-Client-Token validado en /report y /hello.
+  - Sanitizacion de payloads: trunca, descarta query/hash, limita
+    tipos en extra.
+  - Limite de tamaño de body (5MB Express, 32KB cliente-escucha).
+  - credentials:'omit' al enviar (no fuga cookies).
+  - CORS abierto pero sin credenciales -> sirve para uso en LAN.
+  - Backups antes de aplicar fixes (ruta + sufijo fecha).
+  - safe_read en main.py limita lecturas a code_root configurado.
+
+Lo que NO sustituye una auth real:
+  - El token va en JS publico del cliente: cualquiera lo ve.
+  - No hay sesiones ni roles en el dashboard.
+  - El backend Node esta abierto en localhost.
+Recomendado para produccion: VPN/LAN, reverse proxy con TLS y
+autenticacion HTTP, y emitir tokens por sesion desde un backend
+autenticado.
+
+
+------------------------------------------------------------------
+ 15. RESILIENCIA
+------------------------------------------------------------------
+Que pasa si algo cae:
+
+  WAMP/MySQL caido:
+    - /health devuelve db:false.
+    - Endpoints que tocan DB devuelven 500.
+    - El frontend muestra el estado en Settings.
+
+  main.py caido:
+    - Node /chat, /report (parte IA), /resolve fallan.
+    - cliente-escucha NO bloquea la pagina cliente:
+      timeouts duros + cola + try/catch en todos los handlers.
+
+  Backend Node caido:
+    - El frontend muestra errores; vistas vacias.
+    - cliente-escucha sigue mandando a :8000 (no depende de Node).
+
+  Internet flojo en el cliente:
+    - error_capture.js encola en sessionStorage y reintenta.
+    - Tras max reintentos descarta para no acumular eternamente.
+
+  CDN/orquestador caido al cargar la pagina:
+    - LEEME recomienda auto-hospedar los .js y usar defer.
+    - Asi el navegador no bloquea render esperando un script
+      externo que no responde.
+
+
+------------------------------------------------------------------
+ 16. OPERACION DIARIA
+------------------------------------------------------------------
+Rutina sugerida en el dashboard (http://localhost:5173):
+
+  1) "Ahora mismo" — vigilar lo que entra en vivo.
+  2) "Urgentes" — atender primero los rojos.
+  3) "Bandeja" — revisar pending. Para cada uno:
+        - leer mensaje + stack
+        - mirar el diff propuesto
+        - Aprobar (si convence) / Rechazar / dejar para luego
+  4) "Ignorados" — barrer una vez al dia. Si algo no era ruido,
+     pulsar "Resolver ahora".
+  5) "Calendario" — apuntar incidencias y recordatorios.
+  6) "Resumen semanal" — review tipica de viernes.
+  7) "Configuracion" — comprobar que MySQL y Python estan verdes.
+
+
+------------------------------------------------------------------
+ 17. TROUBLESHOOTING
+------------------------------------------------------------------
+- "ECONNREFUSED 127.0.0.1:3306" -> WAMP apagado o MySQL no arrancado.
+- "ECONNREFUSED 127.0.0.1:8000" -> main.py no esta corriendo.
+- 401 invalid client token       -> falta X-Client-Token o difiere
+                                    del valor configurado en main.py.
+- Frontend en blanco             -> /api/* no llega; revisa
+                                    vite.config.js y que Node este vivo.
+- "init-db" falla                -> credenciales mal en .env, o
+                                    usuario sin permisos para CREATE DB.
+- POST a /hello no llega         -> cliente apunta a host equivocado;
+                                    revisa data-endpoint y CORS.
+- Errores duplicados en dashboard-> el dedupe es por carga; si recargas,
+                                    los mismos errores vuelven a entrar.
+- "fetch fallo" loops            -> el wrapper ya filtra requests al
+                                    propio orquestador; si persiste,
+                                    revisa BASE en error_capture.js.
+
+
+------------------------------------------------------------------
+ 18. GLOSARIO
+------------------------------------------------------------------
+preview        propuesta IA para un error: incluye diff y prioridad.
+applied        preview cuyo fix ya se escribio en disco (con backup).
+ignored        preview que el pipeline marco como ruido.
+pipeline IA    cadena Ollama -> Claude/GPT que clasifica y propone.
+cliente-escucha el JS que se pega en cada web para reportar errores.
+orquestador    main.py (FastAPI) en :8000.
+backend        Node Express en :4000.
+frontend       React/Vite en :5173.
+avantservice   sitio cliente de demo, opcional, en :5500.
+
+==================================================================
+ Fin del howto.txt
+==================================================================
