@@ -11,6 +11,25 @@ const PHP_ROOT = path.resolve(process.env.PHP_CODE_ROOT || 'C:/wamp64/www/backen
 const JS_ROOT  = path.resolve(process.env.JS_CODE_ROOT  || 'C:/Users/Lenovo/Desktop/HAM/Pagina web');
 const rootFor = s => (s === 'js' ? JS_ROOT : PHP_ROOT);
 
+// Mapeo APP_NAME (el que envía cliente-escucha en extra.app) -> carpeta en disco.
+// Permite editar la página que está escuchando aunque el error no traiga `file`.
+let APP_ROOTS = {
+  avantservice: 'C:/Users/Lenovo/Desktop/HAM/avantservice',
+  'pagina web': 'C:/Users/Lenovo/Desktop/HAM/Pagina web',
+};
+try {
+  if (process.env.APP_ROOTS_JSON) {
+    APP_ROOTS = { ...APP_ROOTS, ...JSON.parse(process.env.APP_ROOTS_JSON) };
+  }
+} catch {}
+
+function appRootFor(app) {
+  if (!app) return null;
+  const key = String(app).toLowerCase().trim();
+  const p = APP_ROOTS[key];
+  return p ? path.resolve(p) : null;
+}
+
 function safeResolve(source, rel) {
   if (!rel) return null;
   const root = rootFor(source);
@@ -18,6 +37,71 @@ function safeResolve(source, rel) {
   if (!full.startsWith(root)) return null;
   return full;
 }
+
+// Resuelve el archivo objetivo de una preview.
+// 1) Si trae `file` -> safeResolve clásico (PHP_ROOT / JS_ROOT).
+// 2) Si no -> usa extra.app + extra.page_path para apuntar al archivo
+//    real de la web cliente que está escuchando.
+function resolvePreviewTarget(p) {
+  if (p.file) {
+    const t = safeResolve(p.source, p.file);
+    if (t) return { target: t, mode: 'file' };
+  }
+  let extra = p.extra;
+  if (typeof extra === 'string') { try { extra = JSON.parse(extra); } catch { extra = {}; } }
+  extra = extra || {};
+  const root = appRootFor(extra.app);
+  if (!root) return { target: null, mode: null, reason: `app desconocida: ${extra.app || '(none)'}` };
+  let rel = String(extra.page_path || '').replace(/^[\/\\]+/, '');
+  if (!rel || rel.endsWith('/') || rel.endsWith('\\')) rel = path.join(rel, 'index.html');
+  const full = path.resolve(root, rel);
+  if (!full.startsWith(root)) return { target: null, mode: null, reason: 'ruta fuera del root de la app' };
+  return { target: full, mode: 'app', appRoot: root };
+}
+
+// --- Modo auto global (persistido en tabla settings k=autoMode) ---
+async function ensureSettings() {
+  await pool.execute(`CREATE TABLE IF NOT EXISTS settings (
+    k VARCHAR(64) PRIMARY KEY,
+    v TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  )`);
+}
+async function getAutoMode() {
+  await ensureSettings();
+  const [[row]] = await pool.execute('SELECT v FROM settings WHERE k = ?', ['autoMode']);
+  return row?.v || 'priority'; // 'priority' | 'always' | 'never'
+}
+async function setAutoMode(mode) {
+  await ensureSettings();
+  await pool.execute(
+    'INSERT INTO settings (k,v) VALUES (?,?) ON DUPLICATE KEY UPDATE v=VALUES(v)',
+    ['autoMode', mode]
+  );
+}
+
+r.get('/auto-mode', async (_req, res) => {
+  res.json({ mode: await getAutoMode() });
+});
+r.post('/auto-mode', async (req, res) => {
+  const m = String(req.body?.mode || '').trim();
+  if (!['priority', 'always', 'never'].includes(m)) {
+    return res.status(400).json({ error: 'mode debe ser priority|always|never' });
+  }
+  await setAutoMode(m);
+  res.json({ ok: true, mode: m });
+});
+
+// Lista plana de TODOS los IDs (con estado y mensaje corto).
+r.get('/ids', async (req, res) => {
+  const status = req.query.status;
+  let sql = 'SELECT id, status, priority, source, file, LEFT(message,120) AS message, created_at FROM previews';
+  const params = [];
+  if (status) { sql += ' WHERE status = ?'; params.push(status); }
+  sql += ' ORDER BY created_at DESC';
+  const [rows] = await pool.execute(sql, params);
+  res.json({ count: rows.length, ids: rows });
+});
 
 r.get('/', async (req, res) => {
   const status = req.query.status;
@@ -47,8 +131,8 @@ r.post('/:id/approve', async (req, res) => {
   if (!p) return res.status(404).json({ error: 'no encontrado' });
   if (p.status !== 'pending') return res.status(400).json({ error: `estado actual: ${p.status}` });
 
-  const target = safeResolve(p.source, p.file);
-  if (!target) return res.status(400).json({ error: 'ruta inválida' });
+  const { target, reason } = resolvePreviewTarget(p);
+  if (!target) return res.status(400).json({ error: `ruta inválida: ${reason || 'sin app/file'}` });
 
   let backup = null;
   if (fs.existsSync(target)) {
@@ -138,8 +222,21 @@ r.post('/:id/repair', async (req, res, next) => {
     const fixedCode = convo.fixedCode;
 
     // Decisión de auto-aplicado.
-    const autoEligible = (p.priority === 'low' || p.priority === 'medium');
-    const target = fixedCode ? safeResolve(p.source, p.file) : null;
+    // Override por petición: body.auto = true|false (gana sobre el modo global).
+    // Modo global (settings.autoMode):
+    //   'priority' -> auto solo si priority es low/medium (default)
+    //   'always'   -> auto siempre que haya target + fixedCode
+    //   'never'    -> nunca auto, siempre pending
+    const reqAuto = (req.body && typeof req.body.auto === 'boolean') ? req.body.auto : null;
+    const mode = await getAutoMode();
+    let autoEligible;
+    if (reqAuto !== null) autoEligible = reqAuto;
+    else if (mode === 'always') autoEligible = true;
+    else if (mode === 'never')  autoEligible = false;
+    else                        autoEligible = (p.priority === 'low' || p.priority === 'medium');
+
+    const resolved = fixedCode ? resolvePreviewTarget(p) : { target: null };
+    const target = resolved.target;
     const canAutoApply = autoEligible && !!target && !!fixedCode;
 
     let backup = null;
@@ -160,8 +257,8 @@ r.post('/:id/repair', async (req, res, next) => {
         appliedReason = `auto-apply failed: ${e.message}`;
       }
     } else {
-      if (!autoEligible) appliedReason = `requiere revisión manual (priority=${p.priority})`;
-      else if (!target)  appliedReason = 'archivo fuera de raíz permitida (PHP_CODE_ROOT/JS_CODE_ROOT)';
+      if (!autoEligible) appliedReason = `requiere revisión manual (mode=${reqAuto !== null ? 'override-off' : mode}, priority=${p.priority})`;
+      else if (!target)  appliedReason = `no se pudo resolver archivo destino (${resolved.reason || 'sin file ni app conocida'})`;
       else if (!fixedCode) appliedReason = 'la IA no devolvió un bloque de código aplicable';
     }
 

@@ -4,7 +4,7 @@
 const OLLAMA_URL = (process.env.OLLAMA_URL || 'http://localhost:11434').replace(/\/$/, '');
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b';
 
-export async function ollamaChat({ messages, system, model = OLLAMA_MODEL, temperature = 0.2, timeoutMs = 60000 }) {
+export async function ollamaChat({ messages, system, model = OLLAMA_MODEL, temperature = 0.2, timeoutMs = 240000 }) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {

@@ -54,8 +54,15 @@ code, pre, .mono { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monosp
   background: #ffffff;
   border-right: 1px solid var(--line);
   padding: 20px 12px;
+  height: 100vh;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
 }
+.side .brand { flex: 0 0 auto; }
+.side .nav-btn { flex: 0 0 auto; }
 
 /* Brand: logo "A" */
 .brand {
@@ -281,7 +288,10 @@ input:focus, textarea:focus, select:focus {
 .main::-webkit-scrollbar,
 .side::-webkit-scrollbar,
 pre.diff::-webkit-scrollbar,
-textarea::-webkit-scrollbar { width: 10px; height: 10px; }
+textarea::-webkit-scrollbar { width: 12px; height: 12px; }
+.side { scrollbar-width: thin; scrollbar-color: #bdbdbd transparent; }
+.side::-webkit-scrollbar-thumb { background: #bdbdbd; }
+.side::-webkit-scrollbar-thumb:hover { background: #888; }
 .main::-webkit-scrollbar-track,
 .side::-webkit-scrollbar-track,
 pre.diff::-webkit-scrollbar-track { background: transparent; }
