@@ -31,11 +31,12 @@
   // ---- Config tunables --------------------------------------------------
   var REQUEST_TIMEOUT_MS = 5000;     // timeout duro por POST
   var MAX_QUEUE          = 50;       // errores en cola si no hay red
-  var MAX_DEDUPE         = 500;      // tope del set de dedupe (anti-leak)
   var MAX_MSG_LEN        = 2000;     // truncado de mensaje
   var MAX_STACK_LEN      = 4000;     // truncado de stack
   var MAX_PAYLOAD_BYTES  = 32 * 1024;
   var QUEUE_KEY          = '__avantservice_queue__';
+  var COUNT_KEY          = '__avantservice_counts__';
+  var MAX_PER_ERROR      = 5;        // tope de envíos por mismo error (persistente)
   var RETRY_DELAYS       = [2000, 8000, 30000];
 
   // ---- Resolución de endpoint y token ----------------------------------
@@ -250,33 +251,45 @@
     try { window.addEventListener('load',   function () { setTimeout(drain, 1500); }); } catch (e) {}
   }
 
-  // ---- send() con dedupe acotado ---------------------------------------
-  var sentKeys = [];
-  var sentSet  = (typeof Set !== 'undefined') ? new Set() : null;
-
-  function dedupeSeen(key) {
-    if (sentSet) {
-      if (sentSet.has(key)) return true;
-      sentSet.add(key);
-      sentKeys.push(key);
-      if (sentKeys.length > MAX_DEDUPE) {
-        var old = sentKeys.shift();
-        sentSet.delete(old);
-      }
+  // ---- Conteo persistente por error (localStorage, sobrevive recargas)
+  function readCounts() {
+    try {
+      var raw = localStorage.getItem(COUNT_KEY);
+      if (!raw) return {};
+      var obj = JSON.parse(raw);
+      return (obj && typeof obj === 'object') ? obj : {};
+    } catch (e) { return {}; }
+  }
+  function writeCounts(c) {
+    try { localStorage.setItem(COUNT_KEY, JSON.stringify(c)); } catch (e) {}
+  }
+  // true si supera el tope -> no enviar
+  function bumpAndCheck(key) {
+    try {
+      var c = readCounts();
+      var n = (c[key] || 0) + 1;
+      if (n > MAX_PER_ERROR) return true;
+      c[key] = n;
+      writeCounts(c);
       return false;
-    }
-    if (sentKeys.indexOf(key) !== -1) return true;
-    sentKeys.push(key);
-    if (sentKeys.length > MAX_DEDUPE) sentKeys.shift();
-    return false;
+    } catch (e) { return false; }
   }
 
+  // ---- send() (cada ocurrencia se envía hasta MAX_PER_ERROR) -----------
   function send(payload) {
     try {
       payload.message = personalizar(payload.message);
       var key = (payload.message || '') + '|' + (payload.file || '') + ':' + (payload.line || 0);
-      if (dedupeSeen(key)) return;
+      if (bumpAndCheck(key)) return;
+      var here = '';
+      try { here = safeUrl(location.href); } catch (e) {}
       payload.extra = Object.assign({ app: APP_NAME }, payload.extra || {});
+      // Inyectar siempre la pagina origen si no la trae el handler.
+      if (!payload.extra.page && here) payload.extra.page = here;
+      if (!payload.extra.page_path) {
+        try { payload.extra.page_path = relPath(location.href); } catch (e) {}
+      }
+      try { payload.extra.page_title = truncate(document.title || '', 200); } catch (e) {}
       if (APP_RELEASE) payload.extra.release = APP_RELEASE;
       post(ENDPOINT, sanitize(payload));
     } catch (e) { /* nunca propagar al host */ }

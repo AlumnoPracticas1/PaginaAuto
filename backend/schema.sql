@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS previews (
   diff         LONGTEXT,
   validation   TEXT,
   backup_path  VARCHAR(512),
+  extra        JSON         NULL,
+  deployer     VARCHAR(32)  NULL,
+  catalog_code VARCHAR(64)  NULL,
   created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_status (status),
@@ -30,6 +33,31 @@ CREATE TABLE IF NOT EXISTS notes (
   text       TEXT         NOT NULL,
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_date (date)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS error_catalog (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  code          VARCHAR(64)  NOT NULL,
+  platform      VARCHAR(32)  NOT NULL,
+  pattern_regex VARCHAR(512) NULL,
+  category      VARCHAR(64)  NULL,
+  severity      VARCHAR(16)  NOT NULL DEFAULT 'medium',
+  cause         TEXT         NULL,
+  solution      TEXT         NULL,
+  docs_url      VARCHAR(512) NULL,
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_code_platform (code, platform),
+  INDEX idx_platform (platform)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS deployers (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  name          VARCHAR(32)  NOT NULL UNIQUE,
+  display_name  VARCHAR(64)  NOT NULL,
+  url_patterns  JSON         NULL,
+  header_hints  JSON         NULL,
+  color         VARCHAR(16)  NULL,
+  docs_url      VARCHAR(512) NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS chat_messages (

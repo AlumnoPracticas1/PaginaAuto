@@ -56,6 +56,9 @@ export default function PreviewCard({ p, onChange }) {
           <button className="btn primary" disabled={busy}
                   onClick={() => act(() => api.resolveIgnored(p.id))}>Resolver ahora</button>
         )}
+        {p.status === 'processing' && (
+          <span className="muted">⏳ Procesando con la IA…</span>
+        )}
       </div>
 
       {open && full && (

@@ -1,0 +1,409 @@
+==================================================================
+ PAGINAAUTO — explicacion.txt
+ Como funciona TODO, desde antes de que ocurra el error en la
+ web cliente hasta que queda guardado/aplicado en la base de datos
+ y en disco. Sin saltarse pasos.
+==================================================================
+
+
+0) MAPA MENTAL EN UNA FRASE
+------------------------------------------------------------------
+Una web cualquiera lleva pegado un script (cliente-escucha) que
+"escucha" todo lo que va mal. Cuando algo falla, lo manda por HTTP
+a un orquestador en Python (main.py, :8000), que lo clasifica y le
+pide a una IA que proponga un parche. Esa propuesta queda guardada
+en MySQL a traves de un backend Node (:4000), y un dashboard React
+(:5173) la muestra para que un humano apruebe, rechace o ignore.
+Si aprueba, el backend escribe el fix en el archivo real (con
+backup). Cuatro procesos, un solo flujo.
+
+
+1) LOS 4 PROCESOS QUE TIENEN QUE ESTAR VIVOS
+------------------------------------------------------------------
+  P1  main.py            FastAPI    :8000   pipeline IA + /report+/hello
+  P2  backend Node       Express    :4000   API web + persistencia MySQL
+  P3  frontend Vite      React/Vite :5173   dashboard
+  P4  avantservice       http       :5500   sitio demo cliente (opcional)
+
+  + WAMP con MySQL en :3306 (DB "paginaauto").
+
+todolisto.bat los arranca en orden, instala dependencias si faltan
+y abre los navegadores a los 8 segundos.
+
+
+2) ANTES DEL ERROR: PREPARACION EN LA WEB CLIENTE
+------------------------------------------------------------------
+En la web que se va a vigilar (puede ser PHP, HTML estatico, lo
+que sea) se pegan en el <head> los scripts de cliente-escucha/.
+Orden recomendado:
+
+   <script>window.APP_NAME='mi-web';</script>
+   <script src="mensajes.js"               defer></script>
+   <script src="avisos-personalizados.js"  defer></script>
+   <script src="error_capture.js"          defer
+           data-endpoint="http://127.0.0.1:8000"
+           data-token="opcional"></script>
+   <script src="palabras-prohibidas.js"    defer></script>
+   <script src="extensiones-cliente.js"    defer></script>
+
+Cuando carga la pagina, error_capture.js:
+  - Lee data-endpoint y data-token del propio <script>.
+  - Si window.AVANTSERVICE_ENDPOINT/TOKEN existen, los usa.
+  - Registra una sesion (id en sessionStorage) y un dedupe-set
+    de hasta 500 entradas para no mandar el mismo error dos veces
+    en la misma carga.
+  - Engancha listeners:
+       window.onerror              -> errores JS no tratados
+       unhandledrejection          -> promesas rechazadas
+       capture de error en <img>,
+         <script>, <link>          -> recursos que fallan al cargar
+       wrapper sobre window.fetch  -> 4xx/5xx y fallos de red
+       inspector CSS               -> propiedades invalidas en
+                                      hojas same-origin
+  - Llama una vez a POST /hello para registrar al cliente en
+    clients.json del orquestador (asi aparece en "Clientes
+    conectados").
+
+mensajes.js y avisos-personalizados.js cargan tablas de reglas
+(traducir mensajes tecnicos a algo amigable, ignorar ruido, etc).
+palabras-prohibidas.js y extensiones-cliente.js anaden vigilancia
+de inputs (longitudes, patrones, palabras vetadas, throttling,
+console.error/warn, ui-checks, etc).
+
+Conclusion de esta fase: la pagina queda "instrumentada" sin
+bloquear render (todo defer, todo en try/catch, ningun handler
+puede romper el sitio).
+
+
+3) EL ERROR OCURRE
+------------------------------------------------------------------
+Pasa cualquiera de estas cosas:
+  - Un fetch devuelve 500.
+  - Un script tira ReferenceError.
+  - Una imagen 404.
+  - El usuario escribe una palabra prohibida en un input.
+  - Una validacion (campo obligatorio vacio, patron mal) falla.
+  - Una promesa muere sin .catch.
+
+El handler correspondiente de error_capture.js se dispara.
+
+
+4) CONSTRUCCION DEL PAYLOAD (cliente-escucha)
+------------------------------------------------------------------
+error_capture.js construye un objeto:
+  {
+    source:   "js" | "fetch" | "resource" | "css" | "manual" | ...
+    message:  texto del error (truncado a 2 KB)
+    file:     URL del archivo (sin query ni hash)
+    line:     numero de linea si aplica
+    stack:    stack trace truncado a 4 KB
+    extra:    {
+      app:       window.APP_NAME,
+      release:   window.APP_RELEASE,
+      url:       location.href sin query/hash,
+      userAgent, sessionId, ts, ...
+    }
+  }
+
+Reglas que se aplican antes de mandar:
+  - Pasada por mensajes.js / avisos-personalizados.js:
+    si una regla traduce o reemplaza el mensaje, se aplica.
+  - Sanitizacion: limita tipos en extra (nada de funciones,
+    nada de DOM nodes), trunca, recorta URLs.
+  - Dedupe: hash(source+message+file+line). Si esta en el set
+    de la sesion -> se descarta.
+  - Limite global del payload: 32 KB.
+
+Despues:
+  POST {endpoint}/report
+       Content-Type: application/json
+       X-Client-Token: <si esta configurado>
+       credentials: 'omit'         (no manda cookies)
+       keepalive: true             (sobrevive a unload)
+       AbortController timeout 5s
+
+El endpoint suele ser http://127.0.0.1:8000 (main.py). Si el
+operador prefiere persistir primero en MySQL y que Python solo
+clasifique, se apunta a http://localhost:4000 (Node).
+
+
+5) RESILIENCIA EN EL CLIENTE (si la red no responde)
+------------------------------------------------------------------
+  - Si el POST falla o pasa de 5s -> se mete en una cola en
+    sessionStorage (max 50 entradas).
+  - Reintenta con backoff [2s, 8s, 30s].
+  - En el evento 'online' y en 'load' vuelve a vaciar la cola.
+  - Tras agotar reintentos descarta la entrada (no se acumula
+    indefinidamente, no llena memoria).
+  - El wrapper de fetch detecta requests al propio orquestador
+    y NO los re-reporta -> imposible bucle "fetch falla -> reporto
+    ese fallo -> ese reporte falla -> reporto otra vez".
+
+Resultado: la web cliente no se ralentiza ni se rompe aunque el
+orquestador este caido o haya internet flojo.
+
+
+6) LLEGADA A main.py (puerto 8000) — autenticacion ligera
+------------------------------------------------------------------
+main.py es FastAPI. /report y /hello pasan por la dependencia
+require_client_token:
+
+  if AVANTSERVICE_TOKEN no esta definido:
+      modo abierto (compatibilidad)
+  else:
+      exigir header X-Client-Token == AVANTSERVICE_TOKEN
+      si no  -> 401 invalid client token
+
+El token se define con:
+  $env:AVANTSERVICE_TOKEN = "mi-secreto"   (PowerShell)
+  o un archivo .avantservice_token junto a main.py.
+
+Aviso: el token va en JS publico, lo ve cualquiera con DevTools.
+Frena bots casuales, no autentica usuarios reales. Para algo
+serio: VPN/LAN + reverse proxy con TLS + auth HTTP.
+
+
+7) PIPELINE IA EN main.py — clasificacion + propuesta
+------------------------------------------------------------------
+Cuando /report acepta el payload:
+
+  a) safe_read del archivo referenciado, limitado a code_root
+     configurado (no puede leer fuera de ahi).
+  b) Clasificacion de prioridad:
+        urgente | alta | media | baja
+     en base a tipo de error, frecuencia, palabras clave, etc.
+  c) Si prioridad >= AUTO_PROCESS_MIN:
+        - Llama a Ollama (modelo local) para una primera pasada.
+        - Si la respuesta no convence o el modo lo pide, escala
+          a Claude / GPT.
+        - Genera un "diff" candidato y un mensaje amigable.
+     Si prioridad < AUTO_PROCESS_MIN:
+        - Solo guarda una preview pendiente sin tocar IA pesada.
+  d) Crea un JSON en Pagina automatizacion/previews/.
+  e) Devuelve un OK al cliente-escucha (al que ya le da igual,
+     porque el payload ya esta entregado).
+
+
+8) PUENTE PYTHON <-> NODE — pyFetch
+------------------------------------------------------------------
+backend/src/python.js expone:
+  - pyFetch(path, options)  -> hace HTTP a PYTHON_API + path.
+  - pyHealth()              -> GET /health en Python para Settings.
+
+Caminos posibles:
+  Camino A (cliente -> Python directo):
+      cliente-escucha POST :8000/report
+      Python guarda preview JSON
+      Node corre un job/poll que las inserta en MySQL
+      (o el frontend pide /previews y Node a su vez lee/sincroniza)
+
+  Camino B (cliente -> Node):
+      cliente-escucha POST :4000/report
+      Node valida, guarda fila en MySQL con status=pending
+      Node hace pyFetch al pipeline IA para pedir clasificacion+diff
+      Node actualiza la fila con el diff y la prioridad
+
+En ambos casos el resultado final es el mismo: hay una fila en la
+tabla "previews" con todo lo necesario para decidir.
+
+
+9) BACKEND NODE — endpoints (server.js + routes/)
+------------------------------------------------------------------
+server.js levanta Express con:
+  - cors abierto
+  - express.json({ limit: '5mb' })
+  - rutas de routes/*.js
+
+Endpoints:
+
+  GET    /health
+         { db: bool, python: bool, version, ts }
+         Lo usa Settings.jsx en el frontend.
+
+  GET    /previews?status=pending|applied|rejected|ignored
+  GET    /previews/:id
+  POST   /previews/:id/approve
+         - Lee la fila, toma diff, calcula ruta real con
+           PHP_CODE_ROOT o JS_CODE_ROOT segun extension.
+         - Hace backup: archivo.ext.bak.YYYYMMDD-HHMMSS
+         - Aplica el parche (escribe el archivo).
+         - UPDATE previews SET status='applied', updated_at=NOW().
+  POST   /previews/:id/reject
+         UPDATE status='rejected'.
+  POST   /previews/:id/resolve
+         Para previews ignoradas. Hace pyFetch /resolve para que
+         Python las reprocese; UPDATE status='pending' o 'applied'
+         segun lo que devuelva.
+
+  POST   /report
+         Camino B descrito arriba.
+  POST   /inspect
+         Fuerza una pasada de inspeccion en Python.
+
+  GET    /notifications
+         SELECT * FROM previews WHERE priority='urgente'
+         AND status='pending' ORDER BY created_at DESC LIMIT 20.
+
+  GET    /notes, POST /notes, PUT /notes/:id, DELETE /notes/:id
+         CRUD del calendario.
+
+  GET    /chat/history
+  POST   /chat
+         Manda prompt a Python, guarda role='user' y role='assistant'
+         en chat_messages.
+
+  GET    /summary/weekly
+         Agregados de los ultimos 7 dias por dia, fuente y estado.
+
+
+10) BASE DE DATOS — MySQL "paginaauto"
+------------------------------------------------------------------
+Schema en backend/schema.sql, creada por backend/src/init-db.js.
+
+  previews
+    id            BIGINT PK auto
+    source        VARCHAR    (js, fetch, resource, css, manual...)
+    priority      VARCHAR    (urgente, alta, media, baja)
+    status        VARCHAR    (pending, applied, rejected, ignored)
+    message       TEXT
+    file          VARCHAR
+    line          INT
+    stack         TEXT
+    diff          MEDIUMTEXT
+    extra         JSON
+    created_at    DATETIME
+    updated_at    DATETIME
+
+  notes
+    id, fecha, texto, created_at
+
+  chat_messages
+    id, role ('user'|'assistant'), content, created_at
+
+Estados de preview:
+  pending   propuesto, esperando humano
+  applied   aprobado, escrito en disco con backup
+  rejected  rechazado (queda en historial)
+  ignored   pipeline lo marco ruido (rescatable con "Resolver ahora")
+
+
+11) FRONTEND REACT — que ve el operador
+------------------------------------------------------------------
+Vite en :5173 con proxy /api/* -> :4000. main.jsx monta App.jsx
+y App.jsx enruta a las views/:
+
+  Live.jsx       "Ahora mismo": GET /previews?status=pending cada
+                  5 segundos. Tarjetas con prioridad y archivo.
+  Inbox.jsx      Bandeja completa de pending, con paginacion.
+  Urgent.jsx     GET /notifications. Solo prioridad urgente.
+  Calendar.jsx   CRUD sobre /notes.
+  Summary.jsx    GET /summary/weekly. Cards con totales.
+  Ignored.jsx    Lista de ignored. Boton "Resolver ahora" ->
+                  POST /previews/:id/resolve.
+  Chat.jsx       /chat/history al montar; POST /chat al enviar.
+  Settings.jsx   GET /health. Pinta verde/rojo MySQL y Python.
+
+PreviewCard.jsx es el componente reutilizable: muestra mensaje,
+archivo:linea, stack plegable, diff con resaltado y los botones
+Aprobar / Rechazar / Resolver segun el estado.
+
+
+12) CICLO COMPLETO DE UN ERROR (resumen sin saltos)
+------------------------------------------------------------------
+1.  Web cliente carga. error_capture.js engancha listeners y
+    POST /hello a :8000.
+2.  Ocurre el fallo. Handler construye payload, aplica reglas,
+    sanitiza, deduplica.
+3.  POST /report a :8000 con X-Client-Token. Si red mal, encola
+    en sessionStorage y reintenta.
+4.  main.py valida token. Clasifica prioridad. Si pasa el umbral,
+    Ollama -> Claude/GPT proponen diff. Genera preview JSON.
+5.  Node lee/recibe la preview y la inserta/actualiza en MySQL
+    con status='pending'.
+6.  Frontend Live.jsx la muestra a los 5s; si es urgente, salta
+    en Urgent.jsx via /notifications.
+7.  Operador abre la PreviewCard, ve diff, decide:
+       Aprobar  -> POST /previews/:id/approve.
+                   Node hace backup del archivo y escribe el fix.
+                   UPDATE status='applied'.
+       Rechazar -> POST /previews/:id/reject. UPDATE 'rejected'.
+       Ignorar  -> queda como esta; mas tarde desde Ignorados
+                   puede pulsar "Resolver ahora" -> Node llama a
+                   Python /resolve y reentrena/reprocesa.
+8.  El chat (Chat.jsx) y el calendario (Calendar.jsx) van escribiendo
+    en chat_messages y notes en paralelo, segun uso.
+9.  Settings.jsx vigila /health: si MySQL o Python caen, se ve.
+
+
+13) QUE PASA CUANDO ALGO SE CAE
+------------------------------------------------------------------
+  WAMP/MySQL caido:
+    /health -> db:false. Endpoints DB devuelven 500.
+    El frontend muestra Settings en rojo.
+
+  main.py caido:
+    /chat, parte IA de /report y /resolve fallan.
+    cliente-escucha sigue funcionando: timeout 5s + cola + try/catch.
+    La web cliente NO se rompe.
+
+  Backend Node caido:
+    Frontend muestra vistas vacias / errores.
+    cliente-escucha sigue mandando a :8000 (no depende de Node).
+
+  Internet flojo en cliente:
+    Cola sessionStorage + backoff. Tras N reintentos descarta.
+
+  CDN/orquestador no responde al cargar pagina:
+    Los .js estan auto-hospedados con defer; el render no se
+    bloquea esperando.
+
+
+14) SEGURIDAD — donde estan los limites
+------------------------------------------------------------------
+Hecho:
+  - X-Client-Token validado en /report y /hello.
+  - Sanitizacion (truncado, sin query/hash, tipos limitados).
+  - Limite body 5 MB Express, 32 KB cliente.
+  - credentials:'omit'  -> no fuga cookies.
+  - CORS abierto pero sin credenciales (uso LAN).
+  - Backups antes de aplicar fix.
+  - safe_read limita lecturas al code_root.
+
+No hecho (asumir):
+  - El token va en JS publico, es visible.
+  - No hay sesiones ni roles en el dashboard.
+  - Node escucha en localhost.
+
+Para produccion: VPN/LAN + reverse proxy con TLS + auth HTTP +
+tokens por sesion emitidos por backend autenticado.
+
+
+15) DONDE TOCAR CADA COSA (chuleta de archivos)
+------------------------------------------------------------------
+  Captura en cliente:        cliente-escucha/error_capture.js
+  Reglas dev:                cliente-escucha/mensajes.js
+  Reglas instalador (CLI):   cliente-escucha/avisos-personalizados.js
+                             y avisos-cli.js / avisos.bat
+  Vigilancia inputs:         cliente-escucha/palabras-prohibidas.js
+  Validaciones extra:        cliente-escucha/extensiones-cliente.js
+
+  Pipeline IA y /report:     "Pagina automatizacion"/main.py
+  Token compartido:          .avantservice_token o env AVANTSERVICE_TOKEN
+
+  API web y MySQL:           PaginaAuto/backend/src/server.js
+                             PaginaAuto/backend/src/routes/*.js
+                             PaginaAuto/backend/src/python.js
+                             PaginaAuto/backend/schema.sql
+                             PaginaAuto/backend/src/init-db.js
+
+  Dashboard React:           PaginaAuto/frontend/src/App.jsx
+                             PaginaAuto/frontend/src/views/*.jsx
+                             PaginaAuto/frontend/src/components/PreviewCard.jsx
+                             PaginaAuto/frontend/src/api.js
+
+  Arrancar todo:             PaginaAuto/todolisto.bat
+
+
+==================================================================
+ Fin de explicacion.txt
+==================================================================

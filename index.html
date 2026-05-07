@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PaginaAuto · Panel de Vigilancia</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --bg-2: #0f1521;
+    --panel: #131a26;
+    --panel-2: #182030;
+    --border: #1f2937;
+    --text: #d6deeb;
+    --muted: #6b7a90;
+    --accent: #00d4ff;
+    --accent-glow: rgba(0, 212, 255, 0.35);
+    --green: #22c55e;
+    --yellow: #eab308;
+    --orange: #f97316;
+    --red: #ef4444;
+    --purple: #a855f7;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: radial-gradient(ellipse at top, #0f1a2e 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: 'Segoe UI', 'Consolas', monospace;
+    height: 100%;
+    overflow: hidden;
+  }
+  body { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ============ HEADER ============ */
+  header {
+    background: linear-gradient(90deg, var(--panel) 0%, var(--panel-2) 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    row-gap: 8px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .logo {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--accent);
+    text-shadow: 0 0 10px var(--accent-glow);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+  }
+  .pulse {
+    width: 10px; height: 10px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 1.6s infinite;
+  }
+  .pulse.off { background: var(--red); animation: none; }
+  .pulse.paused { background: var(--yellow); animation: none; }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.7); }
+    70% { box-shadow: 0 0 0 12px rgba(34,197,94,0); }
+    100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+  }
+
+  .stats { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .stats-compact {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-row .lbl { font-size: 10px; color: var(--muted); letter-spacing: 1.5px; }
+  .stat-row .val { font-size: 18px; font-weight: 700; }
+  .stat-row .val.total { color: var(--accent); }
+  .stat-row .val.urgent { color: var(--red); text-shadow: 0 0 6px rgba(239,68,68,0.4); }
+  .stat-row .val.high { color: var(--orange); }
+  .stat-row .val.pending { color: var(--yellow); }
+
+  .footer-bar {
+    background: var(--panel-2);
+    border-top: 1px solid var(--border);
+    padding: 4px 14px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  .footer-bar .pulse-mini {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green);
+    animation: pulse 1.6s infinite;
+  }
+  .footer-bar .pulse-mini.off { background: var(--red); animation: none; }
+  .footer-bar .pulse-mini.paused { background: var(--yellow); animation: none; }
+  .footer-bar .spacer { flex: 1; }
+  .footer-bar kbd {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: 'Consolas', monospace;
+    font-size: 10px;
+    color: var(--text);
+  }
+  .stat {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-width: 80px;
+  }
+  .stat .label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; }
+  .stat .value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; display: block; }
+  .stat.urgent .value { color: var(--red); }
+  .stat.high .value { color: var(--orange); }
+  .stat.medium .value { color: var(--yellow); }
+  .stat.total .value { color: var(--accent); }
+
+  .controls {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-left: auto;
+  }
+  .btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.active { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+  .btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .btn.success:hover { border-color: var(--green); color: var(--green); }
+  .conn { font-size: 11px; color: var(--muted); margin-left: 4px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ============ LAYOUT ============ */
+  main {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    min-height: 0;
+    height: 100%;
+  }
+
+  /* ============ LEFT SIDEBAR ============ */
+  .left {
+    width: 280px;
+    flex: 0 0 280px;
+    height: 100%;
+    background: var(--bg-2);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent) var(--bg-2);
+  }
+  .left::-webkit-scrollbar { width: 10px; }
+  .left::-webkit-scrollbar-track { background: var(--bg-2); }
+  .left::-webkit-scrollbar-thumb {
+    background: var(--accent);
+    border: 2px solid var(--bg-2);
+    border-radius: 5px;
+    min-height: 40px;
+  }
+  .section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .section-head {
+    padding: 10px 12px;
+    background: var(--panel-2);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-head h3 {
+    margin: 0;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+  }
+  .section-head .badge {
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-weight: 700;
+  }
+  .section-head .chev {
+    color: var(--muted);
+    font-size: 10px;
+    transition: transform 0.2s;
+  }
+  .section.collapsed .chev { transform: rotate(-90deg); }
+  .section.collapsed .section-body { display: none; }
+  .section {
+    flex: 0 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .section.collapsed { flex: 0 0 auto; }
+  .section-body {
+    padding: 12px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: 240px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent) var(--panel-2);
+  }
+  .section-body::-webkit-scrollbar { width: 10px; }
+  .section-body::-webkit-scrollbar-track { background: var(--panel-2); }
+  .section-body::-webkit-scrollbar-thumb {
+    background: var(--accent);
+    border: 2px solid var(--panel-2);
+    border-radius: 5px;
+    min-height: 30px;
+  }
+
+  /* ----- Filtros ----- */
+  .filter-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .filter-grid .btn { width: 100%; padding: 8px 4px; font-size: 10px; }
+
+  /* ----- Clientes ----- */
+  .client-row {
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--border);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .client-row:last-child { border-bottom: none; }
+  .client-row:hover { background: var(--panel-2); margin: 0 -12px; padding: 8px 12px; border-color: transparent; }
+  .client-row.active { background: rgba(0,212,255,0.08); margin: 0 -12px; padding: 8px 12px; border-left: 3px solid var(--accent); }
+  .client-row .name { color: var(--accent); font-weight: 700; display: flex; justify-content: space-between; }
+  .client-row .url { color: var(--muted); font-family: 'Consolas', monospace; font-size: 10px; word-break: break-all; margin-top: 2px; }
+  .client-row .meta { color: var(--muted); font-size: 10px; margin-top: 4px; }
+  .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-right: 6px;
+    box-shadow: 0 0 6px var(--green);
+  }
+  .dot.stale { background: var(--muted); box-shadow: none; }
+
+  /* ----- URLs monitorizadas ----- */
+  .url-row {
+    padding: 8px 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 11px;
+  }
+  .url-row .url-text {
+    color: var(--text);
+    font-family: 'Consolas', monospace;
+    word-break: break-all;
+    margin-bottom: 4px;
+  }
+  .url-row .url-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .url-row .url-actions { display: flex; gap: 4px; }
+  .icon-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+  .icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .icon-btn.del:hover { color: var(--red); border-color: var(--red); }
+  .add-url {
+    display: flex;
+    gap: 4px;
+    margin-top: 8px;
+  }
+  .add-url input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'Consolas', monospace;
+  }
+  .add-url input:focus { outline: none; border-color: var(--accent); }
+
+  /* ----- Origenes ----- */
+  .src-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px dashed var(--border);
+    font-size: 12px;
+  }
+  .src-row:last-child { border-bottom: none; }
+  .src-row .count { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* ----- Config ----- */
+  .config-row {
+    margin-bottom: 10px;
+  }
+  .config-row label {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 4px;
+  }
+  .config-row input[type="number"], .config-row input[type="text"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'Consolas', monospace;
+  }
+  .config-row input:focus { outline: none; border-color: var(--accent); }
+
+  /* ============ FEED ============ */
+  .feed {
+    flex: 1 1 0;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px 20px;
+    min-width: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--bg);
+  }
+  .feed-title {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .feed-title .right { display: flex; gap: 12px; align-items: center; }
+
+  .error-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--muted);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .error-card.new {
+    animation: slideIn 0.4s ease-out;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .error-card:hover { background: var(--panel-2); border-color: var(--accent); }
+  .error-card.priority-urgent { border-left-color: var(--red); }
+  .error-card.priority-high { border-left-color: var(--orange); }
+  .error-card.priority-medium { border-left-color: var(--yellow); }
+  .error-card.priority-low { border-left-color: var(--green); }
+  .error-card.selected { background: var(--panel-2); border-color: var(--accent); }
+  .error-card.new { animation: flash 1.2s ease-out; }
+  @keyframes flash {
+    0% { background: rgba(0,212,255,0.2); border-color: var(--accent); }
+    100% { background: var(--panel); }
+  }
+
+  .err-row1 { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
+  .pill {
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 700;
+  }
+  .pill.urgent { background: rgba(239,68,68,0.2); color: var(--red); border: 1px solid var(--red); }
+  .pill.high { background: rgba(249,115,22,0.2); color: var(--orange); }
+  .pill.medium { background: rgba(234,179,8,0.2); color: var(--yellow); }
+  .pill.low { background: rgba(34,197,94,0.2); color: var(--green); }
+  .pill.source { background: rgba(168,85,247,0.18); color: var(--purple); border: 1px solid rgba(168,85,247,0.4); }
+  .pill.status { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .pill.deployer { background: rgba(0,212,255,0.12); color: var(--accent); border: 1px solid var(--accent); }
+  .pill.catalog { background: rgba(34,197,94,0.18); color: var(--green); border: 1px solid var(--green); font-family: 'Consolas', monospace; }
+  .pill.count {
+    background: var(--red);
+    color: white;
+    border: 1px solid var(--red);
+    font-weight: 700;
+    box-shadow: 0 0 8px rgba(239,68,68,0.4);
+    font-variant-numeric: tabular-nums;
+  }
+  .pill.count.low { background: var(--yellow); border-color: var(--yellow); color: var(--bg); box-shadow: none; }
+
+  .css-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--purple);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .css-card:hover { background: var(--panel-2); border-color: var(--purple); }
+  .css-card.selected { background: var(--panel-2); border-color: var(--purple); }
+  .css-card .prop {
+    font-family: 'Consolas', monospace;
+    font-size: 13px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin: 4px 0;
+    color: var(--text);
+    word-break: break-all;
+  }
+  .css-card .prop .key { color: var(--purple); font-weight: 700; }
+  .css-card .prop .val { color: var(--yellow); }
+  .css-card .selector {
+    color: var(--accent);
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    word-break: break-all;
+  }
+
+  /* Bloque de reparación IA */
+  .repair-actions {
+    display: flex;
+    gap: 6px;
+    margin: 8px 0 10px 0;
+  }
+  .btn-repair {
+    flex: 1;
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    color: var(--bg);
+    border: none;
+    padding: 9px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: opacity 0.15s;
+  }
+  .btn-repair:hover { opacity: 0.85; }
+  .btn-repair:disabled { opacity: 0.4; cursor: wait; }
+  .btn-approve { background: var(--green); color: var(--bg); border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-weight: 700; font-size: 11px; }
+  .btn-reject { background: var(--red); color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-weight: 700; font-size: 11px; }
+
+  .convo {
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .msg {
+    padding: 8px 10px;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg + .msg { border-top: 1px solid var(--border); }
+  .msg .who {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    margin-bottom: 4px;
+  }
+  .msg.reporter { background: rgba(0,212,255,0.04); }
+  .msg.reporter .who { background: var(--accent); color: var(--bg); }
+  .msg.fixer { background: rgba(168,85,247,0.04); }
+  .msg.fixer .who { background: var(--purple); color: white; }
+  .repair-result {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    border: 1px solid;
+  }
+  .repair-result.applied { background: rgba(34,197,94,0.1); color: var(--green); border-color: var(--green); }
+  .repair-result.manual { background: rgba(234,179,8,0.1); color: var(--yellow); border-color: var(--yellow); }
+  .repair-result.failed { background: rgba(239,68,68,0.1); color: var(--red); border-color: var(--red); }
+  .catalog-box {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(34,197,94,0.08);
+    border-left: 3px solid var(--green);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text);
+  }
+  .catalog-box .ck { color: var(--green); font-weight: 700; font-family: 'Consolas', monospace; }
+  .catalog-box .row { margin-top: 4px; }
+  .catalog-box .row .lbl { color: var(--muted); text-transform: uppercase; font-size: 9px; letter-spacing: 1.5px; }
+  .timestamp { margin-left: auto; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .err-msg {
+    font-size: 12px;
+    color: var(--text);
+    margin: 3px 0;
+    word-break: break-word;
+    line-height: 1.4;
+  }
+  .err-loc {
+    font-size: 10px;
+    color: var(--muted);
+    font-family: 'Consolas', monospace;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 2px;
+  }
+  .err-loc .arrow { color: var(--accent); }
+
+  /* ============ RIGHT SIDEBAR ============ */
+  .sidebar {
+    width: 360px;
+    flex: 0 0 360px;
+    height: 100%;
+    background: var(--bg-2);
+    border-left: 1px solid var(--border);
+    overflow-y: scroll !important;
+    overflow-x: hidden;
+    padding: 14px;
+    scrollbar-width: auto;
+    scrollbar-color: var(--accent) var(--bg);
+  }
+  .sidebar::-webkit-scrollbar { width: 16px !important; }
+  .sidebar::-webkit-scrollbar-thumb {
+    background: var(--accent) !important;
+    border: 3px solid var(--bg) !important;
+    border-radius: 8px !important;
+    min-height: 50px !important;
+  }
+  .feed::-webkit-scrollbar { width: 16px !important; }
+  .feed::-webkit-scrollbar-thumb {
+    background: var(--accent) !important;
+    border: 3px solid var(--bg) !important;
+    border-radius: 8px !important;
+    min-height: 50px !important;
+  }
+  .panel-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .panel-box h3 {
+    margin: 0 0 10px 0;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .detail-empty { color: var(--muted); font-size: 12px; font-style: italic; text-align: center; padding: 20px 0; }
+  .detail-row { margin-bottom: 8px; font-size: 12px; }
+  .detail-row .k { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 1.5px; }
+  .detail-row .v { color: var(--text); word-break: break-word; font-family: 'Consolas', monospace; }
+  .stack {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 11px;
+    font-family: 'Consolas', monospace;
+    max-height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #95a5b8;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--bg);
+  }
+  .detail-row .v { overflow-wrap: anywhere; }
+
+  /* scrollbars siempre visibles */
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-track { background: var(--bg); border-left: 1px solid var(--border); }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 6px;
+    border: 2px solid var(--bg);
+    min-height: 40px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  ::-webkit-scrollbar-corner { background: var(--bg); }
+
+  .empty-state { text-align: center; padding: 50px 20px; color: var(--muted); }
+  .empty-state .big { font-size: 42px; margin-bottom: 12px; opacity: 0.4; }
+
+  .alert-banner {
+    background: linear-gradient(90deg, rgba(239,68,68,0.25), rgba(239,68,68,0.05));
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    color: var(--red);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 700;
+    display: none;
+  }
+  .alert-banner.show { display: block; animation: alert-pulse 1.5s infinite; }
+  @keyframes alert-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+    50% { box-shadow: 0 0 24px 4px rgba(239,68,68,0.3); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">PAGINAAUTO · VIGILANCIA</div>
+  <div class="controls">
+    <button class="btn active" id="btnModeErrors" title="Atajo: 1">⚠ ERRORES <span id="modeErrCount" style="opacity:0.7;">0</span></button>
+    <button class="btn" id="btnModeCss" title="Atajo: 2">💡 CSS <span id="modeCssCount" style="opacity:0.7;">0</span></button>
+    <span style="width:8px;"></span>
+    <button class="btn success" id="btnPause" title="Atajo: Espacio">⏸ PAUSAR</button>
+    <button class="btn" id="btnRefresh" title="Atajo: R">↻ REINTENTAR</button>
+  </div>
+</header>
+
+<main>
+  <!-- ========== LEFT SIDEBAR ========== -->
+  <aside class="left" id="leftCol">
+    <div class="stats-compact">
+      <div class="stat-row"><span class="lbl">TOTAL</span><span class="val total" id="stTotal">0</span></div>
+      <div class="stat-row"><span class="lbl">URGENT</span><span class="val urgent" id="stUrgent">0</span></div>
+      <div class="stat-row"><span class="lbl">HIGH</span><span class="val high" id="stHigh">0</span></div>
+      <div class="stat-row"><span class="lbl">PENDING</span><span class="val pending" id="stPending">0</span></div>
+    </div>
+    <div class="section" data-key="filters">
+      <div class="section-head"><h3>Filtros</h3><span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="filter-grid">
+          <button class="btn active" data-filter="all">Todo</button>
+          <button class="btn" data-filter="pending">Pendientes</button>
+          <button class="btn" data-filter="urgent">Urgentes</button>
+          <button class="btn" data-filter="high">Altas</button>
+          <button class="btn" data-filter="medium">Medias</button>
+          <button class="btn" data-filter="low">Bajas</button>
+        </div>
+        <div id="urlFilterBox" style="margin-top:10px; display:none;">
+          <div style="font-size:10px; color:var(--muted); margin-bottom:4px;">FILTRANDO POR URL:</div>
+          <div id="urlFilterValue" style="font-family:Consolas,monospace; font-size:11px; color:var(--accent); word-break:break-all;"></div>
+          <button class="btn danger" id="clearUrlFilter" style="margin-top:6px; width:100%;">✕ Quitar filtro URL</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-key="clients">
+      <div class="section-head"><h3>Clientes Conectados</h3><span class="badge" id="clientCount">0</span></div>
+      <div class="section-body">
+        <div id="clients"><div class="detail-empty">Esperando handshake…</div></div>
+      </div>
+    </div>
+
+    <div class="section" data-key="urls">
+      <div class="section-head"><h3>URLs Monitorizadas</h3><span class="badge" id="urlCount">0</span></div>
+      <div class="section-body">
+        <div id="urlList"></div>
+        <div class="add-url">
+          <input type="text" id="newUrl" placeholder="http://localhost:5500/" />
+          <button class="btn" id="addUrl">+ ADD</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-key="platforms">
+      <div class="section-head"><h3>Plataformas Detectadas</h3><span class="chev">▼</span></div>
+      <div class="section-body">
+        <div id="platforms"><div class="detail-empty">Sin datos</div></div>
+      </div>
+    </div>
+
+    <div class="section" data-key="sources">
+      <div class="section-head"><h3>Por Origen</h3><span class="chev">▼</span></div>
+      <div class="section-body">
+        <div id="sources"><div class="detail-empty">Sin datos</div></div>
+      </div>
+    </div>
+
+    <div class="section collapsed" data-key="config">
+      <div class="section-head"><h3>Configuración</h3><span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="config-row">
+          <label>Refresco automático (ms)</label>
+          <input type="number" id="cfgRefresh" min="500" step="500" value="3000" />
+        </div>
+        <div class="config-row">
+          <label>Límite de errores mostrados</label>
+          <input type="number" id="cfgLimit" min="10" max="2000" step="10" value="200" />
+        </div>
+        <div class="config-row">
+          <label>Backend API</label>
+          <input type="text" id="cfgApi" />
+        </div>
+        <button class="btn active" id="saveCfg" style="width:100%;">💾 Guardar config</button>
+      </div>
+    </div>
+    <button class="btn" id="btnSound" style="margin-top:auto;">🔔 Sonido ON</button>
+    <button class="btn danger" id="btnClearLocal">🗑 Limpiar config local</button>
+  </aside>
+
+  <!-- ========== CENTER FEED ========== -->
+  <section class="feed">
+    <div class="feed-title">
+      <span id="feedHeader">FLUJO EN VIVO · refresco 3s</span>
+    </div>
+    <div class="alert-banner" id="alertBanner">⚠️ NUEVO ERROR URGENTE DETECTADO</div>
+    <div id="feedList"></div>
+  </section>
+
+  <!-- ========== RIGHT SIDEBAR ========== -->
+  <aside class="sidebar">
+    <div class="panel-box">
+      <h3 id="detailHeader">Resumen</h3>
+      <div id="detail"></div>
+    </div>
+  </aside>
+</main>
+
+<div class="footer-bar">
+  <span class="pulse-mini" id="pulse"></span>
+  <span id="conn">Conectando…</span>
+  <span class="spacer"></span>
+  <span>Últ. refresco: <span id="lastUpdate">—</span></span>
+  <span class="spacer"></span>
+  <span><kbd>Espacio</kbd> pausar · <kbd>R</kbd> reintentar · <kbd>1</kbd>/<kbd>2</kbd> modo · <kbd>Esc</kbd> limpiar filtros</span>
+</div>
+
+<script>
+// ============== STATE & CONFIG ==============
+const DEFAULT_API = (location.protocol === 'http:' || location.protocol === 'https:')
+  ? location.origin
+  : 'http://localhost:4000';
+
+const cfg = loadCfg();
+let API = cfg.api;
+
+const state = {
+  errors: [],
+  knownIds: new Set(),
+  filter: 'all',
+  urlFilter: null,
+  deployerFilter: null,
+  selectedId: null,
+  soundOn: true,
+  paused: false,
+  firstLoad: true,
+  pollTimer: null,
+  clientsTimer: null,
+  deployers: [],   // [{ name, display_name, color, ... }]
+  lastFeedFp: '',
+  lastClientsFp: '',
+  viewMode: 'errors', // 'errors' | 'css'
+};
+
+function isCssSuggestion(e) {
+  const ex = parseExtra(e.extra);
+  return ex.kind === 'css_invalid';
+}
+
+const $ = id => document.getElementById(id);
+
+// ============== CONFIG (persistente) ==============
+function loadCfg() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('panel_cfg') || '{}'); } catch (e) {}
+  return {
+    refreshMs: Number(saved.refreshMs) || 3000,
+    limit: Number(saved.limit) || 200,
+    api: saved.api || DEFAULT_API,
+    urls: Array.isArray(saved.urls) ? saved.urls : [],
+    sections: saved.sections || {},
+  };
+}
+function saveCfg() {
+  try { localStorage.setItem('panel_cfg', JSON.stringify(cfg)); } catch (e) {}
+}
+
+// ============== UTILS ==============
+function timeAgo(iso) {
+  const d = new Date(iso);
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 5) return 'ahora';
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm';
+  if (s < 86400) return Math.floor(s/3600) + 'h';
+  return d.toLocaleDateString();
+}
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function parseExtra(x) {
+  if (!x) return {};
+  if (typeof x === 'object') return x;
+  try { return JSON.parse(x) || {}; } catch (e) { return {}; }
+}
+function beep() {
+  if (!state.soundOn) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine'; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.15, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    o.start(); o.stop(ctx.currentTime + 0.25);
+  } catch(e){}
+}
+
+function setConnection(ok, msg) {
+  const p = $('pulse');
+  if (p) {
+    p.classList.remove('off', 'paused');
+    if (state.paused) p.classList.add('paused');
+    else if (!ok) p.classList.add('off');
+  }
+  const c = $('conn');
+  if (c) {
+    c.textContent = msg;
+    c.style.color = state.paused ? 'var(--yellow)' : (ok ? 'var(--green)' : 'var(--red)');
+  }
+}
+
+// ============== FETCHERS ==============
+async function fetchErrors() {
+  try {
+    const res = await fetch(`${API}/previews`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    setConnection(true, state.paused ? 'PAUSADO' : `OK · ${API}`);
+    handleData(Array.isArray(data) ? data : []);
+  } catch (err) {
+    setConnection(false, `OFFLINE · ${err.message}`);
+  }
+  $('lastUpdate').textContent = new Date().toLocaleTimeString();
+}
+
+async function fetchClients() {
+  try {
+    const res = await fetch(`${API}/clients`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const list = await res.json();
+    renderClients(Array.isArray(list) ? list : []);
+  } catch (e) {}
+}
+
+async function fetchDeployers() {
+  try {
+    const res = await fetch(`${API}/deployers`, { cache: 'no-store' });
+    if (!res.ok) return;
+    state.deployers = await res.json();
+  } catch (e) {}
+}
+function deployerInfo(name) {
+  return state.deployers.find(d => d.name === name) || null;
+}
+
+// ============== DATA HANDLING ==============
+function handleData(rows) {
+  const newOnes = [];
+  for (const r of rows) {
+    if (!state.knownIds.has(r.id)) {
+      newOnes.push(r);
+      state.knownIds.add(r.id);
+    }
+  }
+  state.errors = rows;
+
+  if (!state.firstLoad && newOnes.length) {
+    const urgent = newOnes.find(e => e.priority === 'urgent');
+    if (urgent) {
+      $('alertBanner').classList.add('show');
+      beep();
+      setTimeout(() => $('alertBanner').classList.remove('show'), 4000);
+    } else {
+      beep();
+    }
+  }
+  state.firstLoad = false;
+
+  render(newOnes.map(e => e.id));
+}
+
+function getFiltered() {
+  // Separar errores de sugerencias CSS según el modo activo
+  let list = state.viewMode === 'css'
+    ? state.errors.filter(isCssSuggestion)
+    : state.errors.filter(e => !isCssSuggestion(e));
+  if (state.filter !== 'all') {
+    if (state.filter === 'pending') list = list.filter(e => e.status === 'pending');
+    else list = list.filter(e => e.priority === state.filter);
+  }
+  if (state.urlFilter) {
+    list = list.filter(e => {
+      const ex = parseExtra(e.extra);
+      const u = ex.page || ex.url || '';
+      return u.indexOf(state.urlFilter) === 0;
+    });
+  }
+  if (state.deployerFilter) {
+    list = list.filter(e => e.deployer === state.deployerFilter);
+  }
+  return list;
+}
+
+function groupKey(e) {
+  const ex = parseExtra(e.extra);
+  const page = ex.page || ex.url || '';
+  return [
+    e.source || '',
+    e.file || '',
+    e.line || 0,
+    (e.message || '').slice(0, 200),
+    e.deployer || '',
+    page,
+  ].join('||');
+}
+
+function groupErrors(list) {
+  const map = new Map();
+  for (const e of list) {
+    const k = groupKey(e);
+    const g = map.get(k);
+    if (!g) {
+      map.set(k, { rep: e, count: 1, latest: e.created_at, ids: [e.id], firstSeen: e.created_at });
+    } else {
+      g.count++;
+      g.ids.push(e.id);
+      if (e.created_at > g.latest) { g.latest = e.created_at; g.rep = e; }
+      if (e.created_at < g.firstSeen) g.firstSeen = e.created_at;
+    }
+  }
+  return Array.from(map.values()).sort((a,b) => b.latest.localeCompare(a.latest)).slice(0, cfg.limit);
+}
+
+function render(newIds = []) {
+  // Fingerprint: si nada relevante cambio y no hay nuevos, salimos sin tocar el DOM.
+  const fp = JSON.stringify({
+    n: state.errors.length, mode: state.viewMode,
+    f: state.filter, u: state.urlFilter, d: state.deployerFilter,
+    s: state.selectedId, p: state.paused, lim: cfg.limit,
+    ids: state.errors.map(e => e.id + ':' + e.priority + ':' + e.status),
+  });
+  if (fp === state.lastFeedFp && newIds.length === 0) return;
+  state.lastFeedFp = fp;
+
+  // contadores por modo (header)
+  const realErrors = state.errors.filter(e => !isCssSuggestion(e));
+  const cssSugs = state.errors.filter(isCssSuggestion);
+  $('modeErrCount').textContent = realErrors.length;
+  $('modeCssCount').textContent = cssSugs.length;
+
+  // stats globales del modo activo
+  const base = state.viewMode === 'css' ? cssSugs : realErrors;
+  $('stTotal').textContent = base.length;
+  $('stUrgent').textContent = base.filter(e => e.priority === 'urgent').length;
+  $('stHigh').textContent = base.filter(e => e.priority === 'high').length;
+  $('stPending').textContent = base.filter(e => e.status === 'pending').length;
+
+  // origenes
+  const bySrc = {};
+  for (const e of state.errors) bySrc[e.source || 'unknown'] = (bySrc[e.source || 'unknown'] || 0) + 1;
+  $('sources').innerHTML = Object.keys(bySrc).length
+    ? Object.entries(bySrc).sort((a,b) => b[1]-a[1]).map(([k,v]) =>
+        `<div class="src-row"><span>${escapeHtml(k)}</span><span class="count">${v}</span></div>`).join('')
+    : '<div class="detail-empty">Sin datos</div>';
+
+  // plataformas
+  const byDep = {};
+  for (const e of state.errors) {
+    const d = e.deployer || '(desconocida)';
+    byDep[d] = (byDep[d] || 0) + 1;
+  }
+  $('platforms').innerHTML = Object.keys(byDep).length
+    ? Object.entries(byDep).sort((a,b) => b[1]-a[1]).map(([k,v]) => {
+        const info = deployerInfo(k);
+        const label = info ? info.display_name : k;
+        const color = info?.color || 'var(--muted)';
+        const active = state.deployerFilter === k ? 'active' : '';
+        return `<div class="src-row" data-dep="${escapeHtml(k)}" style="cursor:pointer;${active?'background:rgba(0,212,255,0.1);':''}">
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${escapeHtml(color)};margin-right:6px;"></span>${escapeHtml(label)}</span>
+          <span class="count">${v}</span>
+        </div>`;
+      }).join('')
+    : '<div class="detail-empty">Sin datos</div>';
+  document.querySelectorAll('#platforms [data-dep]').forEach(row => {
+    row.addEventListener('click', () => {
+      const d = row.dataset.dep === '(desconocida)' ? null : row.dataset.dep;
+      state.deployerFilter = state.deployerFilter === d ? null : d;
+      render();
+    });
+  });
+
+  // URLs monitorizadas
+  renderUrls();
+
+  // feed agrupado
+  const filtered = getFiltered();
+  const groups = groupErrors(filtered);
+  const totalGrouped = groups.length;
+  const totalShown = groups.reduce((n, g) => n + g.count, 0);
+  $('feedHeader').textContent = state.paused
+    ? `PAUSADO · ${totalGrouped} grupos / ${totalShown} ocurrencias`
+    : `FLUJO EN VIVO · ${cfg.refreshMs}ms · ${totalGrouped} grupos / ${totalShown} ocurrencias`;
+
+  if (!groups.length) {
+    $('feedList').innerHTML = `<div class="empty-state"><div class="big">📡</div>Sin errores en este filtro.<br/>${state.paused ? 'Polling en pausa.' : 'El sistema está vigilando…'}</div>`;
+    return;
+  }
+
+  $('feedList').innerHTML = groups.map(g => {
+    const e = g.rep;
+    const isNew = g.ids.some(id => newIds.includes(id));
+    const prio = e.priority || 'medium';
+    const status = e.status || 'pending';
+    const loc = [e.file, e.line].filter(Boolean).join(':') || 'sin ubicación';
+    const extra = parseExtra(e.extra);
+    const pageUrl = extra.page || extra.url || null;
+    const app = extra.app || null;
+    const sel = g.ids.includes(state.selectedId) ? 'selected' : '';
+    const depInfo = e.deployer ? deployerInfo(e.deployer) : null;
+    const depLabel = depInfo ? depInfo.display_name : e.deployer;
+    const countPill = g.count > 1
+      ? `<span class="pill count ${g.count < 5 ? 'low' : ''}" title="Mismo error agrupado">×${g.count}</span>`
+      : '';
+    const firstAgo = g.count > 1 ? ` · 1.º hace ${timeAgo(g.firstSeen)}` : '';
+
+    if (state.viewMode === 'css') {
+      // Render como sugerencia CSS
+      const prop = extra.prop || '?';
+      const val  = extra.value || '?';
+      const selector = extra.selector || '(sin selector)';
+      return `
+        <div class="css-card ${isNew ? 'new' : ''} ${sel}" data-id="${escapeHtml(e.id)}">
+          <div class="err-row1">
+            ${countPill}
+            <span class="pill" style="background:rgba(168,85,247,0.18);color:var(--purple);border:1px solid var(--purple);">💡 SUGERENCIA CSS</span>
+            ${app ? `<span class="pill source">${escapeHtml(app)}</span>` : ''}
+            <span class="timestamp">${timeAgo(e.latest)}${firstAgo}</span>
+          </div>
+          <div class="prop"><span class="key">${escapeHtml(prop)}</span>: <span class="val">${escapeHtml(val)}</span>;</div>
+          <div class="selector">▸ ${escapeHtml(selector)}</div>
+          <div class="err-loc"><span class="arrow">📄</span><span>${escapeHtml(loc)}</span></div>
+          ${pageUrl ? `<div class="err-loc"><span class="arrow">🌐</span><span>${escapeHtml(pageUrl)}</span></div>` : ''}
+        </div>`;
+    }
+
+    return `
+      <div class="error-card priority-${prio} ${isNew ? 'new' : ''} ${sel}" data-id="${escapeHtml(e.id)}">
+        <div class="err-row1">
+          ${countPill}
+          <span class="pill ${prio}">${prio}</span>
+          <span class="pill source">${escapeHtml(e.source || '?')}</span>
+          ${app ? `<span class="pill source">${escapeHtml(app)}</span>` : ''}
+          ${e.deployer ? `<span class="pill deployer">☁ ${escapeHtml(depLabel)}</span>` : ''}
+          ${e.catalog_code ? `<span class="pill catalog">${escapeHtml(e.catalog_code)}</span>` : ''}
+          <span class="pill status">${escapeHtml(status)}</span>
+          <span class="timestamp">${timeAgo(e.latest)}${firstAgo}</span>
+        </div>
+        <div class="err-msg">${escapeHtml(e.message || '(sin mensaje)')}</div>
+        <div class="err-loc"><span class="arrow">▸</span><span>${escapeHtml(loc)}</span></div>
+        ${pageUrl ? `<div class="err-loc"><span class="arrow">🌐</span><span>${escapeHtml(pageUrl)}</span></div>` : ''}
+      </div>`;
+  }).join('');
+
+  document.querySelectorAll('.error-card, .css-card').forEach(card => {
+    card.addEventListener('click', () => loadDetail(card.dataset.id));
+  });
+
+  if (!state.selectedId) renderSummary();
+}
+
+function renderClients(list) {
+  const fp = JSON.stringify(list.map(c => c.app + '|' + c.url + '|' + c.hits + '|' + c.last_seen));
+  if (fp === state.lastClientsFp) return;
+  state.lastClientsFp = fp;
+
+  $('clientCount').textContent = list.length;
+  if (!list.length) {
+    $('clients').innerHTML = '<div class="detail-empty">Sin handshake aún</div>';
+    return;
+  }
+  const now = Date.now();
+  $('clients').innerHTML = list.map(c => {
+    const last = new Date(c.last_seen).getTime();
+    const ageSec = Math.floor((now - last) / 1000);
+    const isLive = ageSec < 120;
+    const active = state.urlFilter && c.url && c.url.indexOf(state.urlFilter) === 0 ? 'active' : '';
+    return `
+      <div class="client-row ${active}" data-url="${escapeHtml(c.url || '')}">
+        <div class="name"><span><span class="dot ${isLive?'':'stale'}"></span>${escapeHtml(c.app)}</span><span style="color:var(--muted);font-weight:400;font-size:10px;">${c.hits}p</span></div>
+        <div class="url">${escapeHtml(c.url || '(sin url)')}</div>
+        <div class="meta">visto hace ${ageSec < 60 ? ageSec+'s' : Math.floor(ageSec/60)+'m'}${c.release ? ' · v'+escapeHtml(c.release) : ''}</div>
+      </div>`;
+  }).join('');
+  document.querySelectorAll('.client-row[data-url]').forEach(row => {
+    row.addEventListener('click', () => {
+      const u = row.dataset.url;
+      if (u) setUrlFilter(u);
+    });
+  });
+}
+
+function renderUrls() {
+  $('urlCount').textContent = cfg.urls.length;
+  const counts = {};
+  for (const e of state.errors) {
+    const ex = parseExtra(e.extra);
+    const u = ex.page || ex.url;
+    if (!u) continue;
+    for (const tracked of cfg.urls) {
+      if (u.indexOf(tracked) === 0) counts[tracked] = (counts[tracked] || 0) + 1;
+    }
+  }
+  if (!cfg.urls.length) {
+    $('urlList').innerHTML = '<div class="detail-empty" style="padding:8px 0;">Añade URLs para vigilar</div>';
+    return;
+  }
+  $('urlList').innerHTML = cfg.urls.map((u, i) => {
+    const n = counts[u] || 0;
+    return `
+      <div class="url-row">
+        <div class="url-text">${escapeHtml(u)}</div>
+        <div class="url-meta">
+          <span><span style="color:var(--accent);font-weight:700;">${n}</span> errores</span>
+          <div class="url-actions">
+            <button class="icon-btn" data-act="filter" data-i="${i}" title="Filtrar feed por esta URL">🔍</button>
+            <button class="icon-btn" data-act="open" data-i="${i}" title="Abrir en pestaña nueva">↗</button>
+            <button class="icon-btn del" data-act="del" data-i="${i}" title="Quitar">✕</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  document.querySelectorAll('#urlList .icon-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      const i = Number(b.dataset.i);
+      const u = cfg.urls[i];
+      if (b.dataset.act === 'del') { cfg.urls.splice(i, 1); saveCfg(); render(); }
+      else if (b.dataset.act === 'open') { window.open(u, '_blank'); }
+      else if (b.dataset.act === 'filter') { setUrlFilter(u); }
+    });
+  });
+}
+
+function setUrlFilter(u) {
+  state.urlFilter = u;
+  $('urlFilterBox').style.display = 'block';
+  $('urlFilterValue').textContent = u;
+  render();
+}
+
+function renderSummary() {
+  if (state.selectedId) return; // si hay selección no pisamos
+  $('detailHeader').textContent = 'Resumen';
+  const realErrors = state.errors.filter(e => !isCssSuggestion(e));
+  const urgents = realErrors.filter(e => e.priority === 'urgent').slice(0, 5);
+
+  // top grupos
+  const groups = groupErrors(realErrors).slice(0, 5);
+
+  const urgBlock = urgents.length
+    ? `<div style="margin-bottom:12px;">
+         <div class="k" style="margin-bottom:6px;">🚨 Urgentes recientes</div>
+         ${urgents.map(e => `<div class="src-row" style="cursor:pointer;" data-uid="${escapeHtml(e.id)}">
+           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;display:inline-block;">${escapeHtml(e.message || '')}</span>
+           <span class="count" style="color:var(--red);">${timeAgo(e.created_at)}</span>
+         </div>`).join('')}
+       </div>`
+    : '';
+
+  const topBlock = groups.length
+    ? `<div>
+         <div class="k" style="margin-bottom:6px;">🔁 Más repetidos</div>
+         ${groups.map(g => `<div class="src-row" style="cursor:pointer;" data-uid="${escapeHtml(g.rep.id)}">
+           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;display:inline-block;">${escapeHtml(g.rep.message || '')}</span>
+           <span class="count">×${g.count}</span>
+         </div>`).join('')}
+       </div>`
+    : '';
+
+  $('detail').innerHTML = (urgBlock + topBlock) || '<div class="detail-empty">Aún no hay errores. El sistema está vigilando…</div>';
+  document.querySelectorAll('#detail [data-uid]').forEach(row => {
+    row.addEventListener('click', () => loadDetail(row.dataset.uid));
+  });
+}
+
+async function loadDetail(id) {
+  state.selectedId = id;
+  $('detailHeader').textContent = 'Detalle';
+  document.querySelectorAll('.error-card').forEach(c => c.classList.toggle('selected', c.dataset.id === id));
+  $('detail').innerHTML = '<div class="detail-empty">Cargando…</div>';
+  try {
+    const res = await fetch(`${API}/previews/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const e = await res.json();
+    const loc = [e.file, e.line].filter(Boolean).join(':') || '—';
+    const extra = parseExtra(e.extra);
+    const pageUrl = extra.page || extra.url || null;
+    const extraRows = Object.entries(extra)
+      .filter(([k]) => !['page','url'].includes(k))
+      .map(([k,v]) => `<div class="detail-row"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</div></div>`)
+      .join('');
+    const depInfo = e.deployer ? deployerInfo(e.deployer) : null;
+    const depBlock = e.deployer
+      ? `<div class="detail-row"><div class="k">Plataforma desplegadora</div><div class="v">${escapeHtml(depInfo?.display_name || e.deployer)}${depInfo?.docs_url ? ` · <a href="${escapeHtml(depInfo.docs_url)}" target="_blank" style="color:var(--accent);">docs ↗</a>` : ''}</div></div>`
+      : '';
+
+    let catBlock = '';
+    if (e.catalog_code) {
+      try {
+        const cr = await fetch(`${API}/catalog?platform=${encodeURIComponent(e.deployer || '')}`);
+        const list = cr.ok ? await cr.json() : [];
+        const cat = list.find(c => c.code === e.catalog_code);
+        if (cat) {
+          catBlock = `
+            <div class="catalog-box">
+              <div><span class="ck">${escapeHtml(cat.code)}</span> · ${escapeHtml(cat.platform)} · severidad: <strong>${escapeHtml(cat.severity)}</strong></div>
+              ${cat.category ? `<div class="row"><span class="lbl">Categoría:</span> ${escapeHtml(cat.category)}</div>` : ''}
+              ${cat.cause ? `<div class="row"><span class="lbl">Causa:</span> ${escapeHtml(cat.cause)}</div>` : ''}
+              ${cat.solution ? `<div class="row"><span class="lbl">Solución:</span> ${escapeHtml(cat.solution)}</div>` : ''}
+              ${cat.docs_url ? `<div class="row"><a href="${escapeHtml(cat.docs_url)}" target="_blank" style="color:var(--accent);">Documentación oficial ↗</a></div>` : ''}
+            </div>`;
+        } else {
+          catBlock = `<div class="catalog-box"><span class="ck">${escapeHtml(e.catalog_code)}</span> (entrada de catálogo no localizada)</div>`;
+        }
+      } catch (err) {}
+    }
+
+    const isApplied = e.status === 'applied';
+    const isPendingFix = !!e.fixed && e.status === 'pending';
+    const repairBtns = `
+      <div class="repair-actions">
+        <button class="btn-repair" data-act="repair" data-id="${escapeHtml(e.id)}">🔧 Arreglar con IA</button>
+        ${isPendingFix ? `<button class="btn-approve" data-act="approve" data-id="${escapeHtml(e.id)}">✓ Aplicar</button>
+                          <button class="btn-reject" data-act="reject" data-id="${escapeHtml(e.id)}">✕ Rechazar</button>` : ''}
+      </div>
+      <div id="repairOut"></div>`;
+
+    $('detail').innerHTML = `
+      <div class="detail-row"><div class="k">ID</div><div class="v">${escapeHtml(e.id)}</div></div>
+      ${pageUrl ? `<div class="detail-row"><div class="k">URL del cliente</div><div class="v">${escapeHtml(pageUrl)}</div></div>` : ''}
+      ${depBlock}
+      ${catBlock}
+      <div class="detail-row"><div class="k">Origen · Archivo</div><div class="v">[${escapeHtml(e.source||'?')}] ${escapeHtml(loc)}</div></div>
+      <div class="detail-row"><div class="k">Prioridad</div><div class="v">${escapeHtml(e.priority||'?')} · ${escapeHtml(e.status||'?')}</div></div>
+      ${repairBtns}
+      <div class="detail-row"><div class="k">Mensaje</div><div class="v">${escapeHtml(e.message||'')}</div></div>
+      ${e.diagnosis ? `<div class="detail-row"><div class="k">Diagnóstico IA</div><div class="v">${escapeHtml(e.diagnosis)}</div></div>` : ''}
+      ${e.fixed ? `<div class="detail-row"><div class="k">Fix propuesto</div><div class="stack">${escapeHtml(e.fixed)}</div></div>` : ''}
+      ${extraRows}
+      ${e.stack ? `<div class="detail-row"><div class="k">Stack</div><div class="stack">${escapeHtml(e.stack)}</div></div>` : ''}
+      <div class="detail-row"><div class="k">Recibido</div><div class="v">${new Date(e.created_at).toLocaleString()}</div></div>
+    `;
+
+    document.querySelectorAll('#detail [data-act]').forEach(b => {
+      b.addEventListener('click', () => {
+        const act = b.dataset.act, pid = b.dataset.id;
+        if (act === 'repair') doRepair(pid, b);
+        else if (act === 'approve') doApprove(pid);
+        else if (act === 'reject') doReject(pid);
+      });
+    });
+  } catch (err) {
+    $('detail').innerHTML = `<div class="detail-empty">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ============== REPAIR (Ollama) ==============
+async function doRepair(id, btn) {
+  const out = $('repairOut');
+  if (btn) { btn.disabled = true; btn.textContent = '🔧 Generando reparación…'; }
+  out.innerHTML = '<div class="detail-empty">Hablando con la IA (REPORTER → FIXER)…</div>';
+  try {
+    const r = await fetch(`${API}/previews/${encodeURIComponent(id)}/repair`, { method: 'POST' });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || ('HTTP ' + r.status));
+    }
+    const j = await r.json();
+
+    const convoHtml = `<div class="convo">
+      ${j.conversation.map(m => `<div class="msg ${m.role}"><span class="who">${m.role}</span><br/>${escapeHtml(m.content)}</div>`).join('')}
+    </div>`;
+
+    let resultHtml = '';
+    if (j.applied) {
+      resultHtml = `<div class="repair-result applied">✓ APLICADO automáticamente · prioridad ${j.priority}<br/>${j.backup ? `Backup: ${escapeHtml(j.backup)}` : ''}<br/>${escapeHtml(j.reason)}</div>`;
+    } else if (j.fixedCode) {
+      resultHtml = `<div class="repair-result manual">⚠ Requiere revisión manual · ${escapeHtml(j.reason || '')}<br/>Usa los botones ✓ Aplicar / ✕ Rechazar de arriba.</div>`;
+    } else {
+      resultHtml = `<div class="repair-result failed">✕ ${escapeHtml(j.reason || 'sin código aplicable')}</div>`;
+    }
+
+    out.innerHTML = convoHtml + resultHtml;
+    // refrescar la fila para que aparezcan botones aplicar/rechazar
+    setTimeout(() => loadDetail(id), 500);
+  } catch (e) {
+    out.innerHTML = `<div class="repair-result failed">✕ ${escapeHtml(e.message)}<br/><span style="color:var(--muted);font-size:10px;">¿Está Ollama corriendo? Verifica con: ollama list</span></div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔧 Arreglar con IA'; }
+  }
+}
+
+async function doApprove(id) {
+  if (!confirm('¿Aplicar el fix propuesto al archivo del cliente?')) return;
+  try {
+    const r = await fetch(`${API}/previews/${encodeURIComponent(id)}/approve`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'error');
+    alert('Aplicado. Backup: ' + (j.backup || '(sin backup)'));
+    loadDetail(id);
+    fetchErrors();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function doReject(id) {
+  try {
+    await fetch(`${API}/previews/${encodeURIComponent(id)}/reject`, { method: 'POST' });
+    loadDetail(id);
+    fetchErrors();
+  } catch (e) {}
+}
+
+// ============== POLLING CONTROL ==============
+function startPolling() {
+  stopPolling();
+  fetchErrors();
+  fetchClients();
+  state.pollTimer = setInterval(fetchErrors, cfg.refreshMs);
+  state.clientsTimer = setInterval(fetchClients, cfg.refreshMs);
+}
+function stopPolling() {
+  if (state.pollTimer) clearInterval(state.pollTimer);
+  if (state.clientsTimer) clearInterval(state.clientsTimer);
+  state.pollTimer = null;
+  state.clientsTimer = null;
+}
+function setPaused(paused) {
+  state.paused = paused;
+  if (paused) {
+    stopPolling();
+    setConnection(true, 'PAUSADO');
+  } else {
+    startPolling();
+  }
+  $('btnPause').innerHTML = paused ? '▶ REANUDAR' : '⏸ PAUSAR';
+  $('btnPause').classList.toggle('success', !paused);
+  $('btnPause').classList.toggle('danger', paused);
+  render();
+}
+
+// ============== UI WIRING ==============
+document.querySelectorAll('.btn[data-filter]').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.btn[data-filter]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    state.filter = b.dataset.filter;
+    render();
+  });
+});
+
+$('clearUrlFilter').addEventListener('click', () => {
+  state.urlFilter = null;
+  $('urlFilterBox').style.display = 'none';
+  render();
+});
+
+function setMode(mode) {
+  state.viewMode = mode;
+  $('btnModeErrors').classList.toggle('active', mode === 'errors');
+  $('btnModeCss').classList.toggle('active', mode === 'css');
+  state.lastFeedFp = ''; // forzar re-render
+  render();
+}
+$('btnModeErrors').addEventListener('click', () => setMode('errors'));
+$('btnModeCss').addEventListener('click', () => setMode('css'));
+
+$('btnPause').addEventListener('click', () => setPaused(!state.paused));
+$('btnRefresh').addEventListener('click', () => { fetchErrors(); fetchClients(); });
+$('btnSound').addEventListener('click', () => {
+  state.soundOn = !state.soundOn;
+  $('btnSound').textContent = state.soundOn ? '🔔 ON' : '🔕 OFF';
+});
+$('btnClearLocal').addEventListener('click', () => {
+  if (!confirm('¿Limpiar config local del panel y caché de IDs vistos?')) return;
+  localStorage.removeItem('panel_cfg');
+  state.knownIds = new Set();
+  location.reload();
+});
+
+// secciones colapsables
+document.querySelectorAll('.section .section-head').forEach(h => {
+  h.addEventListener('click', () => {
+    const sec = h.parentElement;
+    sec.classList.toggle('collapsed');
+    cfg.sections[sec.dataset.key] = sec.classList.contains('collapsed');
+    saveCfg();
+  });
+});
+// restaurar estado de secciones
+for (const [k, v] of Object.entries(cfg.sections)) {
+  const sec = document.querySelector(`.section[data-key="${k}"]`);
+  if (sec) sec.classList.toggle('collapsed', !!v);
+}
+
+// añadir URL
+$('addUrl').addEventListener('click', () => {
+  const v = $('newUrl').value.trim();
+  if (!v) return;
+  if (!cfg.urls.includes(v)) cfg.urls.push(v);
+  $('newUrl').value = '';
+  saveCfg();
+  render();
+});
+$('newUrl').addEventListener('keydown', e => { if (e.key === 'Enter') $('addUrl').click(); });
+
+// config
+$('cfgRefresh').value = cfg.refreshMs;
+$('cfgLimit').value = cfg.limit;
+$('cfgApi').value = cfg.api;
+$('saveCfg').addEventListener('click', () => {
+  cfg.refreshMs = Math.max(500, Number($('cfgRefresh').value) || 3000);
+  cfg.limit = Math.max(10, Number($('cfgLimit').value) || 200);
+  cfg.api = $('cfgApi').value.trim() || DEFAULT_API;
+  API = cfg.api;
+  saveCfg();
+  if (!state.paused) startPolling();
+  render();
+  $('saveCfg').textContent = '✓ Guardado';
+  setTimeout(() => $('saveCfg').textContent = '💾 Guardar config', 1500);
+});
+
+// atajos de teclado
+document.addEventListener('keydown', (ev) => {
+  // ignorar si el foco está en un input/textarea
+  const tag = (ev.target?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+
+  if (ev.code === 'Space') { ev.preventDefault(); setPaused(!state.paused); }
+  else if (ev.key.toLowerCase() === 'r') { ev.preventDefault(); fetchErrors(); fetchClients(); }
+  else if (ev.key === '1') { setMode('errors'); }
+  else if (ev.key === '2') { setMode('css'); }
+  else if (ev.key === 'Escape') {
+    state.urlFilter = null;
+    state.deployerFilter = null;
+    state.selectedId = null;
+    $('urlFilterBox').style.display = 'none';
+    state.lastFeedFp = '';
+    render();
+    renderSummary();
+  }
+});
+
+// arranque
+fetchDeployers().then(startPolling);
+renderSummary();
+</script>
+</body>
+</html>
