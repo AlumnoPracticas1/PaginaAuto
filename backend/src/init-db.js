@@ -32,6 +32,9 @@ async function addColIfMissing(table, ddl) {
 await addColIfMissing('previews', 'extra JSON NULL');
 await addColIfMissing('previews', 'deployer VARCHAR(32) NULL');
 await addColIfMissing('previews', 'catalog_code VARCHAR(64) NULL');
+await addColIfMissing('previews', 'pr_url VARCHAR(512) NULL');
+await addColIfMissing('previews', 'pr_branch VARCHAR(255) NULL');
+await addColIfMissing('previews', 'pr_critical TINYINT(1) NULL');
 
 await conn.query(`USE \`${DB}\``);
 

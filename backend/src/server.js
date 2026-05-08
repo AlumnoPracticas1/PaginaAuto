@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool } from './db.js';
 import { pyHealth, pyFetch } from './python.js';
+import { ghProxyHealth, isEnabled as ghEnabled } from './github-proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,13 +25,16 @@ app.get('/health', async (_req, res) => {
   let db = false;
   try { await pool.query('SELECT 1'); db = true; } catch {}
   const py = await pyHealth();
-  res.json({ ok: db, db, python: py });
+  const gh = ghEnabled() ? await ghProxyHealth() : { ok: false, reason: 'no configurado' };
+  res.json({ ok: db, db, python: py, github_proxy: gh });
 });
 
 // Servir el panel de vigilancia (index.html en la raiz de PaginaAuto)
 const PANEL_DIR = path.resolve(__dirname, '..', '..');
 app.get('/panel', (_req, res) => res.sendFile(path.join(PANEL_DIR, 'index.html')));
 app.get('/', (_req, res) => res.redirect('/panel'));
+// Sirve estáticos (logo, etc.) desde la raíz de PaginaAuto.
+app.use('/', express.static(PANEL_DIR, { index: false, extensions: false }));
 
 app.use('/notes', notesRouter);
 app.use('/previews', previewsRouter);

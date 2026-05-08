@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pool } from '../db.js';
 import { pyFetch } from '../python.js';
-import { repairConversation } from '../ollama.js';
+import { repairConversation, applyPatchPlan } from '../ollama.js';
+import { isEnabled as ghEnabled, repoForApp, ghProxyPropose } from '../github-proxy.js';
 
 const r = Router();
 
@@ -28,6 +29,35 @@ function appRootFor(app) {
   const key = String(app).toLowerCase().trim();
   const p = APP_ROOTS[key];
   return p ? path.resolve(p) : null;
+}
+
+// Heurística: ¿este snippet se puede usar como archivo completo de reemplazo?
+// Si NO, hay que dejarlo como `pending` para revisión manual aunque la
+// prioridad permita auto-apply, porque sobrescribir con un fragmento o
+// con prosa de la IA destruye el archivo original.
+function isSafeFullReplacement(code, targetPath) {
+  if (!code || typeof code !== 'string') return { ok: false, reason: 'sin código' };
+  const ext = (targetPath.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+  const head = code.trimStart().slice(0, 200).toLowerCase();
+  const proseMarkers = /(explicaci[oó]n\s*:|snippet\s*:|análisis|aqu[ií] (te|tienes)|reporter:|fixer:)/i;
+  if (proseMarkers.test(code.slice(0, 400))) {
+    return { ok: false, reason: 'la IA devolvió prosa explicativa, no un archivo limpio' };
+  }
+  if (ext === 'html' || ext === 'htm') {
+    if (!head.includes('<!doctype') && !head.includes('<html')) {
+      return { ok: false, reason: 'snippet HTML incompleto (sin <!DOCTYPE/<html>)' };
+    }
+    if (!/charset\s*=\s*["']?utf-8/i.test(code)) {
+      return { ok: false, reason: 'falta <meta charset="UTF-8"> — se rompería la codificación' };
+    }
+  }
+  if (ext === 'js' || ext === 'mjs') {
+    // los .js no deben contener líneas tipo "EXPLICACIÓN:" sueltas.
+    if (/^\s*(explicaci[oó]n|snippet)\s*:/im.test(code)) {
+      return { ok: false, reason: 'snippet JS contiene texto en prosa' };
+    }
+  }
+  return { ok: true };
 }
 
 function safeResolve(source, rel) {
@@ -133,20 +163,61 @@ r.post('/:id/approve', async (req, res) => {
 
   const { target, reason } = resolvePreviewTarget(p);
   if (!target) return res.status(400).json({ error: `ruta inválida: ${reason || 'sin app/file'}` });
+  if (!fs.existsSync(target)) return res.status(400).json({ error: `archivo destino no existe: ${target}` });
 
-  let backup = null;
-  if (fs.existsSync(target)) {
-    backup = `${target}.${Date.now()}.bak`;
-    fs.copyFileSync(target, backup);
+  // Intenta interpretar p.fixed como patchPlan JSON. Si lo es -> aplica parches
+  // quirúrgicos. Si no, rechaza el approve (no sobrescribimos el archivo entero).
+  let patchPlan = null;
+  if (p.fixed) {
+    try {
+      const obj = JSON.parse(p.fixed);
+      if (obj && Array.isArray(obj.patches)) patchPlan = obj;
+    } catch {}
   }
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, p.fixed ?? '', 'utf8');
+  if (!patchPlan) {
+    return res.status(400).json({ error: 'esta preview no tiene un plan de parches aplicable. Pulsa "Arreglar con IA" primero.' });
+  }
+
+  const current = fs.readFileSync(target, 'utf8');
+  const result = applyPatchPlan(current, patchPlan);
+  if (!result.ok) {
+    return res.status(409).json({ error: `parche no aplicable: ${result.reason}` });
+  }
+
+  // ¿Mandar a GitHub o escribir local?
+  let extraObj = p.extra;
+  if (typeof extraObj === 'string') { try { extraObj = JSON.parse(extraObj); } catch { extraObj = {}; } }
+  const repoMap = repoForApp(extraObj?.app);
+  if (ghEnabled() && repoMap) {
+    try {
+      let repoPath = String(extraObj?.page_path || '').replace(/^[\/\\]+/, '');
+      if (!repoPath || repoPath.endsWith('/') || repoPath.endsWith('\\')) repoPath = (repoPath || '') + 'index.html';
+      const proposal = await ghProxyPropose({
+        owner: repoMap.owner, repo: repoMap.repo, baseBranch: repoMap.branch || 'main',
+        files: [{ path: repoPath, content: result.content }],
+        message: `fix(avantdef): ${(p.message || 'cambio aprobado').slice(0, 100)}`,
+        priority: p.priority,
+        previewId: p.id,
+      });
+      await pool.execute(
+        `UPDATE previews SET status = ?, pr_url = ?, pr_branch = ?, pr_critical = ? WHERE id = ?`,
+        ['applied', proposal.pr?.url || null, proposal.branch || null, proposal.critical ? 1 : 0, p.id]
+      );
+      return res.json({ ok: true, applied: result.applied, pr: { url: proposal.pr?.url, branch: proposal.branch, critical: proposal.critical, merged: proposal.merged } });
+    } catch (e) {
+      return res.status(502).json({ error: `github-proxy falló: ${e.message}` });
+    }
+  }
+
+  const backup = `${target}.${Date.now()}.bak`;
+  fs.copyFileSync(target, backup);
+  fs.writeFileSync(target, result.content, 'utf8');
 
   await pool.execute(
     'UPDATE previews SET status = ?, backup_path = ? WHERE id = ?',
     ['applied', backup, p.id]
   );
-  res.json({ ok: true, backup });
+  res.json({ ok: true, backup, applied: result.applied });
 });
 
 r.post('/:id/reject', async (req, res) => {
@@ -207,11 +278,19 @@ r.post('/:id/repair', async (req, res, next) => {
       catalogInfo = c || null;
     }
 
+    // Resuelve antes de llamar a la IA para poder mandarle el contenido actual.
+    const resolvedPre = resolvePreviewTarget(p);
+    let currentContent = null;
+    if (resolvedPre.target && fs.existsSync(resolvedPre.target)) {
+      try { currentContent = fs.readFileSync(resolvedPre.target, 'utf8'); } catch {}
+    }
+
     let convo;
     try {
       convo = await repairConversation({
         message: p.message, file: p.file, line: p.line, stack: p.stack,
         source: p.source, deployer: p.deployer, catalogCode: p.catalog_code, catalogInfo,
+        targetPath: resolvedPre.target, currentContent,
       });
     } catch (e) {
       return res.status(503).json({ error: 'Ollama no disponible', detail: e.message });
@@ -219,7 +298,7 @@ r.post('/:id/repair', async (req, res, next) => {
 
     const diagnosis = convo.conversation[0].content;
     const fixerOutput = convo.conversation[1].content;
-    const fixedCode = convo.fixedCode;
+    const patchPlan = convo.patchPlan;
 
     // Decisión de auto-aplicado.
     // Override por petición: body.auto = true|false (gana sobre el modo global).
@@ -235,42 +314,97 @@ r.post('/:id/repair', async (req, res, next) => {
     else if (mode === 'never')  autoEligible = false;
     else                        autoEligible = (p.priority === 'low' || p.priority === 'medium');
 
-    const resolved = fixedCode ? resolvePreviewTarget(p) : { target: null };
-    const target = resolved.target;
-    const canAutoApply = autoEligible && !!target && !!fixedCode;
+    const target = resolvedPre.target;
+    // Pre-aplica el plan en memoria para validar que cuadra con el archivo actual.
+    const AI_INCAPABLE = `Esta IA (${convo.model}) no tiene el potencial como para resolver este problema. Prueba un modelo más grande (qwen2.5:7b, llama3.1:8b) o resuélvelo manualmente.`;
+    let dryRun = { ok: false, reason: AI_INCAPABLE, aiIncapable: true };
+    if (!target) {
+      dryRun = { ok: false, reason: 'no se pudo resolver archivo destino' };
+    } else if (currentContent == null) {
+      dryRun = { ok: false, reason: 'no se pudo leer el archivo destino' };
+    } else if (!patchPlan) {
+      dryRun = { ok: false, reason: AI_INCAPABLE, aiIncapable: true };
+    } else if (!patchPlan.patches || patchPlan.patches.length === 0) {
+      dryRun = { ok: false, reason: AI_INCAPABLE, aiIncapable: true };
+    } else {
+      const r = applyPatchPlan(currentContent, patchPlan);
+      // Si el plan existe pero no encaja con el archivo (find no encontrado o
+      // ambiguo), es porque la IA inventó/citó mal -> es un fallo de potencial.
+      dryRun = r.ok ? r : { ...r, aiIncapable: true, reason: AI_INCAPABLE };
+    }
+    const canAutoApply = autoEligible && dryRun.ok;
 
     let backup = null;
     let applied = false;
     let appliedReason = null;
+    let prInfo = null; // { url, branch, critical }
 
-    if (canAutoApply) {
+    // ¿Esta preview está mapeada a un repo de GitHub? (extra.app -> APP_REPOS_JSON)
+    let extraObj = p.extra;
+    if (typeof extraObj === 'string') { try { extraObj = JSON.parse(extraObj); } catch { extraObj = {}; } }
+    const repoMap = repoForApp(extraObj?.app);
+    const useGitHub = ghEnabled() && repoMap && dryRun.ok;
+
+    if (canAutoApply && useGitHub) {
       try {
-        if (fs.existsSync(target)) {
-          backup = `${target}.${Date.now()}.bak`;
-          fs.copyFileSync(target, backup);
-        }
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.writeFileSync(target, fixedCode, 'utf8');
+        // Path relativo dentro del repo: usamos extra.page_path (o index.html) sin la raíz local.
+        let repoPath = String(extraObj?.page_path || '').replace(/^[\/\\]+/, '');
+        if (!repoPath || repoPath.endsWith('/') || repoPath.endsWith('\\')) repoPath = (repoPath || '') + 'index.html';
+        const proposal = await ghProxyPropose({
+          owner: repoMap.owner, repo: repoMap.repo, baseBranch: repoMap.branch || 'main',
+          files: [{ path: repoPath, content: dryRun.content }],
+          message: `fix(avantdef): ${(p.message || 'cambio automático').slice(0, 100)}`,
+          priority: p.priority,
+          previewId: p.id,
+        });
         applied = true;
-        appliedReason = `auto (priority=${p.priority})`;
+        prInfo = { url: proposal.pr?.url || null, branch: proposal.branch, critical: !!proposal.critical, merged: !!proposal.merged };
+        appliedReason = proposal.merged
+          ? `GitHub: rama ${proposal.branch} mergeada en ${repoMap.branch}`
+          : (proposal.critical
+              ? `GitHub: PR crítico abierto, requiere revisión humana — ${proposal.pr?.url || ''}`
+              : `GitHub: PR abierto — ${proposal.pr?.url || ''}`);
       } catch (e) {
-        appliedReason = `auto-apply failed: ${e.message}`;
+        appliedReason = `github-proxy falló: ${e.message}`;
       }
-    } else {
-      if (!autoEligible) appliedReason = `requiere revisión manual (mode=${reqAuto !== null ? 'override-off' : mode}, priority=${p.priority})`;
-      else if (!target)  appliedReason = `no se pudo resolver archivo destino (${resolved.reason || 'sin file ni app conocida'})`;
-      else if (!fixedCode) appliedReason = 'la IA no devolvió un bloque de código aplicable';
+    } else if (canAutoApply) {
+      // Fallback: escribir en disco local como antes.
+      try {
+        backup = `${target}.${Date.now()}.bak`;
+        fs.copyFileSync(target, backup);
+        fs.writeFileSync(target, dryRun.content, 'utf8');
+        applied = true;
+        appliedReason = `local · ${dryRun.applied} parche(s) aplicados`;
+      } catch (e) {
+        appliedReason = `auto-apply falló: ${e.message}`;
+      }
     }
+    if (!applied && !appliedReason) {
+      if (!autoEligible)        appliedReason = `requiere revisión manual (mode=${reqAuto !== null ? 'override-off' : mode}, priority=${p.priority})`;
+      else if (!target)         appliedReason = `no se pudo resolver archivo destino (${resolvedPre.reason || 'sin file ni app conocida'})`;
+      else                      appliedReason = dryRun.reason;
+    }
+
+    // Para revisión manual, persistimos el plan para que el endpoint /approve
+    // pueda re-aplicarlo cuando el operador lo decida.
+    const patchPlanJson = patchPlan ? JSON.stringify(patchPlan) : null;
 
     await pool.execute(
       `UPDATE previews SET
-         diagnosis = ?, fixed = ?, status = ?, backup_path = COALESCE(?, backup_path)
+         diagnosis = ?, fixed = ?, status = ?,
+         backup_path = COALESCE(?, backup_path),
+         pr_url = COALESCE(?, pr_url),
+         pr_branch = COALESCE(?, pr_branch),
+         pr_critical = COALESCE(?, pr_critical)
        WHERE id = ?`,
       [
         diagnosis,
-        fixedCode || fixerOutput,
+        patchPlanJson || fixerOutput,
         applied ? 'applied' : 'pending',
         backup,
+        prInfo?.url || null,
+        prInfo?.branch || null,
+        prInfo ? (prInfo.critical ? 1 : 0) : null,
         p.id,
       ]
     );
@@ -279,11 +413,14 @@ r.post('/:id/repair', async (req, res, next) => {
       ok: true,
       model: convo.model,
       conversation: convo.conversation,
-      fixedCode,
+      patchPlan,
+      dryRun: { ok: dryRun.ok, reason: dryRun.reason || null, applied: dryRun.applied || 0, aiIncapable: !!dryRun.aiIncapable },
       applied,
       backup,
+      pr: prInfo,
       reason: appliedReason,
       priority: p.priority,
+      target,
     });
   } catch (e) { next(e); }
 });

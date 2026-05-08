@@ -3,9 +3,36 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PaginaAuto · Panel de Vigilancia</title>
+<title>AvantDefw1</title>
 <style>
-  :root {
+  /* ============ Tema VSCode (Dark+) — por defecto ============ */
+  :root, html[data-theme="vscode"] {
+    --bg: #1e1e1e;
+    --bg-2: #252526;
+    --panel: #252526;
+    --panel-2: #2d2d30;
+    --border: #3e3e42;
+    --text: #d4d4d4;
+    --muted: #858585;
+    --accent: #569cd6;
+    --accent-glow: rgba(86, 156, 214, 0.35);
+    --green: #6a9955;
+    --yellow: #dcdcaa;
+    --orange: #ce9178;
+    --red: #f48771;
+    --purple: #c586c0;
+    --cyan: #4ec9b0;
+    --varblue: #9cdcfe;
+    --selection: #264f78;
+    --statusbar: #007acc;
+    --header-bg: #323233;
+    --body-bg: #1e1e1e;
+    --scrollbar-thumb: #424242;
+    --scrollbar-thumb-hover: #4f4f4f;
+  }
+
+  /* ============ Tema Cyber (azul cian, el original) ============ */
+  html[data-theme="cyber"] {
     --bg: #0a0e14;
     --bg-2: #0f1521;
     --panel: #131a26;
@@ -20,21 +47,60 @@
     --orange: #f97316;
     --red: #ef4444;
     --purple: #a855f7;
+    --cyan: #00d4ff;
+    --varblue: #93c5fd;
+    --selection: #1e3a8a;
+    --statusbar: #0891b2;
+    --header-bg: linear-gradient(90deg, #131a26 0%, #182030 100%);
+    --body-bg: radial-gradient(ellipse at top, #0f1a2e 0%, #0a0e14 60%);
+    --scrollbar-thumb: #1f2937;
+    --scrollbar-thumb-hover: #374151;
+  }
+
+  /* ============ Tema Light (Samsung-style, blanco) ============ */
+  html[data-theme="light"] {
+    --bg: #ffffff;
+    --bg-2: #f7f7f7;
+    --panel: #ffffff;
+    --panel-2: #f0f0f0;
+    --border: #e0e0e0;
+    --text: #1a1a1a;
+    --muted: #777777;
+    --accent: #0066cc;
+    --accent-glow: rgba(0, 102, 204, 0.20);
+    --green: #137333;
+    --yellow: #b58900;
+    --orange: #cc5500;
+    --red: #b3261e;
+    --purple: #6f42c1;
+    --cyan: #0d9488;
+    --varblue: #1d4ed8;
+    --selection: #b3d4fc;
+    --statusbar: #0066cc;
+    --header-bg: #ffffff;
+    --body-bg: #ffffff;
+    --scrollbar-thumb: #c0c0c0;
+    --scrollbar-thumb-hover: #909090;
   }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0;
-    background: radial-gradient(ellipse at top, #0f1a2e 0%, var(--bg) 60%);
+    background: var(--body-bg);
     color: var(--text);
-    font-family: 'Segoe UI', 'Consolas', monospace;
+    font-family: 'Cascadia Code', 'Consolas', 'Segoe UI', monospace;
     height: 100%;
     overflow: hidden;
   }
+  ::selection { background: var(--selection); color: var(--text); }
+  ::-webkit-scrollbar { width: 14px; height: 14px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border: 3px solid var(--bg); border-radius: 0; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
   body { display: flex; flex-direction: column; height: 100vh; }
 
   /* ============ HEADER ============ */
   header {
-    background: linear-gradient(90deg, var(--panel) 0%, var(--panel-2) 100%);
+    background: var(--header-bg);
     border-bottom: 1px solid var(--border);
     padding: 8px 16px;
     display: flex;
@@ -45,15 +111,20 @@
     flex-shrink: 0;
   }
   .logo {
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    color: var(--accent);
-    text-shadow: 0 0 10px var(--accent-glow);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text);
+    text-shadow: none;
     display: flex;
     align-items: center;
     gap: 10px;
     white-space: nowrap;
+  }
+  .logo img {
+    height: 28px;
+    width: auto;
+    display: block;
   }
   .pulse {
     width: 10px; height: 10px;
@@ -274,7 +345,7 @@
   }
   .client-row:last-child { border-bottom: none; }
   .client-row:hover { background: var(--panel-2); margin: 0 -12px; padding: 8px 12px; border-color: transparent; }
-  .client-row.active { background: rgba(0,212,255,0.08); margin: 0 -12px; padding: 8px 12px; border-left: 3px solid var(--accent); }
+  .client-row.active { background: rgba(86,156,214,0.12); margin: 0 -12px; padding: 8px 12px; border-left: 3px solid var(--accent); }
   .client-row .name { color: var(--accent); font-weight: 700; display: flex; justify-content: space-between; }
   .client-row .url { color: var(--muted); font-family: 'Consolas', monospace; font-size: 10px; word-break: break-all; margin-top: 2px; }
   .client-row .meta { color: var(--muted); font-size: 10px; margin-top: 4px; }
@@ -422,7 +493,7 @@
   .error-card.selected { background: var(--panel-2); border-color: var(--accent); }
   .error-card.new { animation: flash 1.2s ease-out; }
   @keyframes flash {
-    0% { background: rgba(0,212,255,0.2); border-color: var(--accent); }
+    0% { background: rgba(86,156,214,0.25); border-color: var(--accent); }
     100% { background: var(--panel); }
   }
 
@@ -441,7 +512,7 @@
   .pill.low { background: rgba(34,197,94,0.2); color: var(--green); }
   .pill.source { background: rgba(168,85,247,0.18); color: var(--purple); border: 1px solid rgba(168,85,247,0.4); }
   .pill.status { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
-  .pill.deployer { background: rgba(0,212,255,0.12); color: var(--accent); border: 1px solid var(--accent); }
+  .pill.deployer { background: rgba(86,156,214,0.15); color: var(--accent); border: 1px solid var(--accent); }
   .pill.catalog { background: rgba(34,197,94,0.18); color: var(--green); border: 1px solid var(--green); font-family: 'Consolas', monospace; }
   .pill.count {
     background: var(--red);
@@ -535,7 +606,7 @@
     border-radius: 10px;
     margin-bottom: 4px;
   }
-  .msg.reporter { background: rgba(0,212,255,0.04); }
+  .msg.reporter { background: rgba(86,156,214,0.06); }
   .msg.reporter .who { background: var(--accent); color: var(--bg); }
   .msg.fixer { background: rgba(168,85,247,0.04); }
   .msg.fixer .who { background: var(--purple); color: white; }
@@ -622,6 +693,23 @@
     letter-spacing: 2px;
   }
   .detail-empty { color: var(--muted); font-size: 12px; font-style: italic; text-align: center; padding: 20px 0; }
+  .group-nav {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; margin: 0 0 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .group-nav .btn {
+    padding: 4px 10px; font-size: 14px; line-height: 1;
+    min-width: 32px; text-align: center;
+  }
+  .group-nav .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .group-nav .nav-pos {
+    font-weight: 700; color: var(--accent);
+    font-variant-numeric: tabular-nums; min-width: 60px; text-align: center;
+  }
+  .group-nav .nav-hint { font-size: 10px; color: var(--muted); margin-left: auto; }
   .detail-row { margin-bottom: 8px; font-size: 12px; }
   .detail-row .k { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 1.5px; }
   .detail-row .v { color: var(--text); word-break: break-word; font-family: 'Consolas', monospace; }
@@ -680,13 +768,14 @@
 <body>
 
 <header>
-  <div class="logo">PAGINAAUTO · VIGILANCIA</div>
+  <div class="logo"><img src="tu-logo.png" alt="logo" onerror="this.style.display='none'"/>AvantDefw1</div>
   <div class="controls">
     <button class="btn active" id="btnModeErrors" title="Atajo: 1">⚠ ERRORES <span id="modeErrCount" style="opacity:0.7;">0</span></button>
     <button class="btn" id="btnModeCss" title="Atajo: 2">💡 CSS <span id="modeCssCount" style="opacity:0.7;">0</span></button>
     <span style="width:8px;"></span>
     <button class="btn success" id="btnPause" title="Atajo: Espacio">⏸ PAUSAR</button>
     <button class="btn" id="btnRefresh" title="Atajo: R">↻ REINTENTAR</button>
+    <button class="btn" id="btnTheme" title="Cambiar tema (Atajo: T)">🎨 <span id="themeName">VSCode</span></button>
   </div>
 </header>
 
@@ -815,6 +904,8 @@ const state = {
   urlFilter: null,
   deployerFilter: null,
   selectedId: null,
+  groupIds: [],     // ids del grupo (mismo error agrupado) que estamos navegando
+  groupIndex: 0,    // posición actual dentro de groupIds
   soundOn: true,
   paused: false,
   firstLoad: true,
@@ -1050,7 +1141,7 @@ function render(newIds = []) {
         const label = info ? info.display_name : k;
         const color = info?.color || 'var(--muted)';
         const active = state.deployerFilter === k ? 'active' : '';
-        return `<div class="src-row" data-dep="${escapeHtml(k)}" style="cursor:pointer;${active?'background:rgba(0,212,255,0.1);':''}">
+        return `<div class="src-row" data-dep="${escapeHtml(k)}" style="cursor:pointer;${active?'background:rgba(86,156,214,0.15);':''}">
           <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${escapeHtml(color)};margin-right:6px;"></span>${escapeHtml(label)}</span>
           <span class="count">${v}</span>
         </div>`;
@@ -1137,7 +1228,26 @@ function render(newIds = []) {
   }).join('');
 
   document.querySelectorAll('.error-card, .css-card').forEach(card => {
-    card.addEventListener('click', () => loadDetail(card.dataset.id));
+    card.addEventListener('click', () => {
+      // Encuentra el grupo al que pertenece esta tarjeta y mete TODOS sus ids
+      // en state.groupIds para poder navegarlos con ◀ ▶.
+      const g = groups.find(gr => gr.ids.includes(card.dataset.id));
+      if (g) {
+        // Ordena ids por created_at descendente para que ◀/▶ vaya cronológicamente.
+        const byId = new Map(state.errors.map(er => [er.id, er]));
+        state.groupIds = [...g.ids].sort((a, b) => {
+          const da = byId.get(a)?.created_at || '';
+          const db = byId.get(b)?.created_at || '';
+          return db.localeCompare(da);
+        });
+        state.groupIndex = state.groupIds.indexOf(card.dataset.id);
+        if (state.groupIndex < 0) state.groupIndex = 0;
+      } else {
+        state.groupIds = [card.dataset.id];
+        state.groupIndex = 0;
+      }
+      loadDetail(card.dataset.id);
+    });
   });
 
   if (!state.selectedId) renderSummary();
@@ -1257,6 +1367,23 @@ function renderSummary() {
   });
 }
 
+function gotoGroup(delta) {
+  if (!state.groupIds.length) return;
+  const next = state.groupIndex + delta;
+  if (next < 0 || next >= state.groupIds.length) return;
+  state.groupIndex = next;
+  loadDetail(state.groupIds[next]);
+}
+
+document.addEventListener('keydown', (ev) => {
+  // Solo si el detalle está abierto y no estamos escribiendo en un input.
+  if (!state.selectedId) return;
+  const tag = (ev.target?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  if (ev.key === 'ArrowLeft')  { ev.preventDefault(); gotoGroup(-1); }
+  if (ev.key === 'ArrowRight') { ev.preventDefault(); gotoGroup(+1); }
+});
+
 async function loadDetail(id) {
   state.selectedId = id;
   $('detailHeader').textContent = 'Detalle';
@@ -1309,7 +1436,21 @@ async function loadDetail(id) {
       </div>
       <div id="repairOut"></div>`;
 
+    // Navegador del grupo: muestra ◀ 1/4 ▶ si hay más de una ocurrencia.
+    const groupSize = state.groupIds.length;
+    const groupIdx  = state.groupIds.indexOf(id);
+    if (groupIdx >= 0) state.groupIndex = groupIdx;
+    const navBlock = groupSize > 1
+      ? `<div class="group-nav">
+           <button class="btn nav-prev" ${state.groupIndex <= 0 ? 'disabled' : ''} title="Anterior (←)">◀</button>
+           <span class="nav-pos">${state.groupIndex + 1} / ${groupSize}</span>
+           <button class="btn nav-next" ${state.groupIndex >= groupSize - 1 ? 'disabled' : ''} title="Siguiente (→)">▶</button>
+           <span class="nav-hint">ocurrencias agrupadas del mismo error</span>
+         </div>`
+      : '';
+
     $('detail').innerHTML = `
+      ${navBlock}
       <div class="detail-row"><div class="k">ID</div><div class="v">${escapeHtml(e.id)}</div></div>
       ${pageUrl ? `<div class="detail-row"><div class="k">URL del cliente</div><div class="v">${escapeHtml(pageUrl)}</div></div>` : ''}
       ${depBlock}
@@ -1324,6 +1465,11 @@ async function loadDetail(id) {
       ${e.stack ? `<div class="detail-row"><div class="k">Stack</div><div class="stack">${escapeHtml(e.stack)}</div></div>` : ''}
       <div class="detail-row"><div class="k">Recibido</div><div class="v">${new Date(e.created_at).toLocaleString()}</div></div>
     `;
+
+    const navPrev = document.querySelector('#detail .nav-prev');
+    const navNext = document.querySelector('#detail .nav-next');
+    if (navPrev) navPrev.addEventListener('click', () => gotoGroup(-1));
+    if (navNext) navNext.addEventListener('click', () => gotoGroup(+1));
 
     document.querySelectorAll('#detail [data-act]').forEach(b => {
       b.addEventListener('click', () => {
@@ -1449,6 +1595,29 @@ $('btnModeCss').addEventListener('click', () => setMode('css'));
 
 $('btnPause').addEventListener('click', () => setPaused(!state.paused));
 $('btnRefresh').addEventListener('click', () => { fetchErrors(); fetchClients(); });
+
+// ====== Toggle de tema (VSCode → Cyber → Light → VSCode) ======
+const THEMES = ['vscode', 'cyber', 'light'];
+const THEME_LABELS = { vscode: 'VSCode', cyber: 'Cyber', light: 'Light' };
+function applyTheme(name) {
+  if (!THEMES.includes(name)) name = 'vscode';
+  document.documentElement.setAttribute('data-theme', name);
+  $('themeName').textContent = THEME_LABELS[name];
+  try { localStorage.setItem('avantdef-theme', name); } catch {}
+}
+applyTheme((() => { try { return localStorage.getItem('avantdef-theme') || 'vscode'; } catch { return 'vscode'; } })());
+$('btnTheme').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme') || 'vscode';
+  const next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
+  applyTheme(next);
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 't' || ev.key === 'T') {
+    const tag = (ev.target?.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return;
+    $('btnTheme').click();
+  }
+});
 $('btnSound').addEventListener('click', () => {
   state.soundOn = !state.soundOn;
   $('btnSound').textContent = state.soundOn ? '🔔 ON' : '🔕 OFF';

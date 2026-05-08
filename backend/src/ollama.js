@@ -33,8 +33,14 @@ export async function ollamaChat({ messages, system, model = OLLAMA_MODEL, tempe
   }
 }
 
-// Conversación de 2 mensajes: REPORTER analiza el error y FIXER propone arreglo.
-export async function repairConversation({ message, file, line, stack, source, deployer, catalogCode, catalogInfo }) {
+// Conversación de 2 mensajes: REPORTER analiza el error y FIXER propone parches
+// quirúrgicos en formato JSON {explanation, patches:[{find,replace}]}.
+// Cada `find` debe ser texto LITERAL existente en el archivo objetivo, lo que
+// permite hacer search/replace seguro en lugar de sobrescribir el archivo entero.
+export async function repairConversation({
+  message, file, line, stack, source, deployer, catalogCode, catalogInfo,
+  targetPath, currentContent,
+}) {
   const errBlock = [
     `Mensaje: ${message || '(sin mensaje)'}`,
     file ? `Archivo: ${file}${line ? ':' + line : ''}` : null,
@@ -46,10 +52,21 @@ export async function repairConversation({ message, file, line, stack, source, d
     stack ? `Stack:\n${String(stack).slice(0, 1500)}` : null,
   ].filter(Boolean).join('\n');
 
-  // PASO 1 — REPORTER: explica claramente qué error es y por qué ocurre.
+  // Recorta el contenido del archivo si es muy grande (modelos pequeños tienen
+  // poco contexto). Mantenemos cabecera + cola para no romper el HTML.
+  const MAX = 8000;
+  let fileBlock = '';
+  if (currentContent) {
+    let snippet = currentContent;
+    if (snippet.length > MAX) {
+      snippet = snippet.slice(0, MAX / 2) + '\n... [contenido recortado] ...\n' + snippet.slice(-MAX / 2);
+    }
+    fileBlock = `\nContenido actual de ${targetPath || 'archivo'}:\n\`\`\`\n${snippet}\n\`\`\``;
+  }
+
+  // PASO 1 — REPORTER
   const reporterPrompt = `Eres REPORTER, un analista de errores web.
-Recibes un error y debes describirlo en 3-5 líneas, en español, sin código.
-Explica:
+Recibes un error y describes en 3-5 líneas, en español, sin código:
 1. Qué falló exactamente.
 2. Causa más probable.
 3. En qué fichero/línea se produce.
@@ -61,29 +78,38 @@ Sé conciso y técnico.`;
     temperature: 0.1,
   });
 
-  // PASO 2 — FIXER: lee el análisis y propone el código corregido.
-  const fixerPrompt = `Eres FIXER, un programador senior. Recibes el análisis de un error de REPORTER
-y propones la corrección. Responde EXCLUSIVAMENTE en este formato:
+  // PASO 2 — FIXER: parches quirúrgicos en JSON.
+  const fixerPrompt = `Eres FIXER, un programador senior. Devuelves SOLO un objeto JSON válido,
+sin texto antes ni después, sin bloques de código, sin comentarios. Esquema EXACTO:
 
-EXPLICACIÓN: una línea diciendo qué cambias.
-SNIPPET:
-\`\`\`<lenguaje>
-<código corregido o el bloque que reemplaza al original>
-\`\`\`
+{
+  "explanation": "una línea explicando el cambio",
+  "patches": [
+    { "find": "TEXTO LITERAL que aparece en el archivo actual", "replace": "TEXTO NUEVO que lo reemplaza" }
+  ]
+}
 
-Sé directo, sin preámbulos. Si no puedes inferir el código original, propón una pieza mínima reproducible.`;
+REGLAS DURAS:
+- "find" debe ser una porción LITERAL del archivo actual mostrado abajo, copiada tal cual (mismos espacios, mismas comillas, mismo case). NO inventes código que no esté.
+- "find" debe ser único en el archivo (suficientemente largo / con contexto) para que aparezca UNA sola vez.
+- "replace" es la versión corregida de ese mismo fragmento.
+- Si necesitas varios cambios, usa varios objetos en el array "patches".
+- Si NO puedes proponer un parche fiable contra el archivo actual, devuelve "patches": [].
+- NO devuelvas el archivo entero. NO uses triples backticks. NO uses prosa fuera del JSON.`;
 
   const fixerReply = await ollamaChat({
     system: fixerPrompt,
     messages: [
-      { role: 'user', content: `Error original:\n${errBlock}\n\nAnálisis de REPORTER:\n${reporterReply}\n\nPropón la corrección.` },
+      {
+        role: 'user',
+        content: `Error original:\n${errBlock}\n\nAnálisis de REPORTER:\n${reporterReply}${fileBlock}\n\nDevuelve el JSON con los parches.`,
+      },
     ],
-    temperature: 0.2,
+    temperature: 0.1,
   });
 
-  // Extrae el bloque de código si lo hay.
-  const codeMatch = fixerReply.match(/```[a-zA-Z0-9_+-]*\n([\s\S]*?)```/);
-  const fixedCode = codeMatch ? codeMatch[1].trim() : null;
+  // Extrae el JSON aunque el modelo añada texto alrededor.
+  const patchPlan = parsePatchJson(fixerReply);
 
   return {
     model: OLLAMA_MODEL,
@@ -91,8 +117,56 @@ Sé directo, sin preámbulos. Si no puedes inferir el código original, propón 
       { role: 'reporter', content: reporterReply },
       { role: 'fixer', content: fixerReply },
     ],
-    fixedCode,
+    patchPlan,
   };
+}
+
+function parsePatchJson(text) {
+  if (!text) return null;
+  // Quita posibles fences ```json ... ```
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fence ? fence[1] : text;
+  // Busca el primer { y el último } que cierre.
+  const start = candidate.indexOf('{');
+  const end   = candidate.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  const slice = candidate.slice(start, end + 1);
+  try {
+    const obj = JSON.parse(slice);
+    if (!obj || !Array.isArray(obj.patches)) return null;
+    const patches = obj.patches.filter(p => p && typeof p.find === 'string' && typeof p.replace === 'string' && p.find.length > 0);
+    return { explanation: String(obj.explanation || ''), patches };
+  } catch { return null; }
+}
+
+// Aplica un patchPlan a un contenido. Devuelve {ok, content, applied, errors}.
+// Cada parche exige que `find` aparezca EXACTAMENTE 1 vez en el contenido
+// (acumulando lo aplicado por parches previos). Si no, se aborta sin escribir.
+export function applyPatchPlan(originalContent, patchPlan) {
+  if (!patchPlan || !Array.isArray(patchPlan.patches) || patchPlan.patches.length === 0) {
+    return { ok: false, reason: 'sin parches', content: originalContent, applied: 0 };
+  }
+  let content = originalContent;
+  let applied = 0;
+  for (const p of patchPlan.patches) {
+    const occurrences = countOccurrences(content, p.find);
+    if (occurrences === 0) {
+      return { ok: false, reason: `parche #${applied + 1}: "find" no encontrado en el archivo`, content, applied };
+    }
+    if (occurrences > 1) {
+      return { ok: false, reason: `parche #${applied + 1}: "find" ambiguo (${occurrences} coincidencias)`, content, applied };
+    }
+    content = content.replace(p.find, p.replace);
+    applied++;
+  }
+  return { ok: true, content, applied };
+}
+
+function countOccurrences(haystack, needle) {
+  if (!needle) return 0;
+  let count = 0, idx = 0;
+  while ((idx = haystack.indexOf(needle, idx)) !== -1) { count++; idx += needle.length; }
+  return count;
 }
 
 export async function ollamaHealth() {
