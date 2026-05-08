@@ -15,6 +15,7 @@ import reportRouter from './routes/report.js';
 import chatRouter from './routes/chat.js';
 import summaryRouter from './routes/summary.js';
 import catalogRouter from './routes/catalog.js';
+import githubRouter from './routes/github.js';
 import { refreshCache, detectDeployer, getDeployers } from './detector.js';
 
 const app = express();
@@ -44,6 +45,7 @@ app.use('/report', reportRouter);
 app.use('/chat', chatRouter);
 app.use('/summary', summaryRouter);
 app.use('/catalog', catalogRouter);
+app.use('/github', githubRouter);
 
 app.get('/deployers', (_req, res) => res.json(getDeployers()));
 

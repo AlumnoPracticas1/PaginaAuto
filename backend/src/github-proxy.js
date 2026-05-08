@@ -6,7 +6,9 @@
 // un { owner, repo, branch }. Ejemplo:
 //   APP_REPOS_JSON={"avantservice":{"owner":"AlumnoPracticas1","repo":"avantservice","branch":"main"}}
 
-const PROXY_URL = (process.env.GITHUB_PROXY_URL || '').replace(/\/$/, '');
+// Si GITHUB_PROXY_URL no está, asumimos que el proxy vive dentro del propio
+// backend (router /github) — desde el mismo proceso resolvemos via http local.
+const PROXY_URL = (process.env.GITHUB_PROXY_URL || `http://127.0.0.1:${process.env.PORT || 4000}/github`).replace(/\/$/, '');
 const INTERNAL_TOKEN = process.env.GITHUB_PROXY_INTERNAL_TOKEN || '';
 
 let APP_REPOS = {
@@ -20,8 +22,13 @@ try {
   console.warn('[github-proxy] APP_REPOS_JSON inválido:', e.message);
 }
 
+// Habilitado siempre que tengamos:
+//  - GH_APP_ID + (GH_PRIVATE_KEY o GH_PRIVATE_KEY_PATH)
+//  - o GITHUB_PROXY_URL apuntando a un servicio externo
 export function isEnabled() {
-  return !!PROXY_URL;
+  if (process.env.GITHUB_PROXY_URL) return true;
+  if (process.env.GH_APP_ID && (process.env.GH_PRIVATE_KEY || process.env.GH_PRIVATE_KEY_PATH)) return true;
+  return false;
 }
 
 export function repoForApp(appName) {

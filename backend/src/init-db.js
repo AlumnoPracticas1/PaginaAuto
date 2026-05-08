@@ -19,8 +19,8 @@ if (process.env.DATABASE_URL) {
   } catch {}
   // Quita CREATE DATABASE/USE — no tenemos privilegios en cloud.
   sql = sql
-    .replace(/CREATE\s+DATABASE[^;]*;/gi, '')
-    .replace(/USE\s+[^;]+;/gi, '');
+    .replace(/\bCREATE\s+DATABASE\b[^;]*;/gi, '')
+    .replace(/(^|[\r\n])\s*USE\s+[^;]+;/gi, '$1');
 }
 
 function connConfig() {
@@ -48,7 +48,12 @@ const cfg = connConfig();
 if (process.env.DATABASE_URL) cfg.database = DB; // forzar la DB cloud
 const conn = await mysql.createConnection(cfg);
 
-await conn.query(sql);
+// Ejecuta sentencia por sentencia para evitar problemas con multipleStatements
+// y/o servidores que no lo permiten.
+const stmts = sql.split(';').map(s => s.trim()).filter(Boolean);
+for (const s of stmts) {
+  await conn.query(s);
+}
 
 // Migraciones idempotentes (añade columnas si previews ya existía).
 async function addColIfMissing(table, ddl) {
