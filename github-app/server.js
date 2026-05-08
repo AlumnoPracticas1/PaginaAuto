@@ -15,22 +15,31 @@ import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 const PORT = Number(process.env.PORT || 4100);
 const APP_ID = process.env.GH_APP_ID;
 const KEY_PATH = process.env.GH_PRIVATE_KEY_PATH;
+const KEY_INLINE = process.env.GH_PRIVATE_KEY; // alternativa para Railway/Vercel
 const WEBHOOK_SECRET = process.env.GH_WEBHOOK_SECRET || '';
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
 
-if (!APP_ID || !KEY_PATH) {
-  console.error('[avantdef-github-app] Falta GH_APP_ID o GH_PRIVATE_KEY_PATH en .env');
-  process.exit(1);
-}
-if (!fs.existsSync(KEY_PATH)) {
-  console.error(`[avantdef-github-app] No encuentro la private key en ${path.resolve(KEY_PATH)}`);
+if (!APP_ID) {
+  console.error('[avantdef-github-app] Falta GH_APP_ID en .env');
   process.exit(1);
 }
 
-const app = new App({
-  appId: APP_ID,
-  privateKey: fs.readFileSync(KEY_PATH, 'utf8'),
-});
+let privateKey = '';
+if (KEY_INLINE) {
+  // En cloud: pega la .pem entera en GH_PRIVATE_KEY (con saltos como \n literales).
+  privateKey = KEY_INLINE.replace(/\\n/g, '\n');
+} else if (KEY_PATH) {
+  if (!fs.existsSync(KEY_PATH)) {
+    console.error(`[avantdef-github-app] No encuentro la private key en ${path.resolve(KEY_PATH)}`);
+    process.exit(1);
+  }
+  privateKey = fs.readFileSync(KEY_PATH, 'utf8');
+} else {
+  console.error('[avantdef-github-app] Falta GH_PRIVATE_KEY_PATH (local) o GH_PRIVATE_KEY (cloud)');
+  process.exit(1);
+}
+
+const app = new App({ appId: APP_ID, privateKey });
 
 // Webhooks solo se inicializan si has configurado un secret. Sin secret no
 // podemos verificar firmas, así que el endpoint queda desactivado.

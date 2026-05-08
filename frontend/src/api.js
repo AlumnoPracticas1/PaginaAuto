@@ -1,4 +1,6 @@
-const BASE = '/api';
+// En desarrollo Vite proxy redirige /api/* -> :4000.
+// En producción (Vercel) define VITE_API_BASE con la URL pública del backend Railway.
+const BASE = import.meta.env.VITE_API_BASE || '/api';
 
 async function req(method, path, body) {
   const res = await fetch(`${BASE}${path}`, {

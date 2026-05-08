@@ -18,7 +18,9 @@ import catalogRouter from './routes/catalog.js';
 import { refreshCache, detectDeployer, getDeployers } from './detector.js';
 
 const app = express();
-app.use(cors());
+// CORS: si pones ALLOWED_ORIGINS=url1,url2 en .env, restringe a ese listado.
+const ALLOWED = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors(ALLOWED.length ? { origin: ALLOWED, credentials: false } : {}));
 app.use(express.json({ limit: '5mb' }));
 
 app.get('/health', async (_req, res) => {

@@ -6,19 +6,49 @@ import mysql from 'mysql2/promise';
 import { DEPLOYERS, CATALOG } from './seed-catalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const sql = fs.readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8');
+let sql = fs.readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8');
 
-const conn = await mysql.createConnection({
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  multipleStatements: true,
-});
+// En cloud (Railway/etc) no podemos crear DBs nuevas; usamos la que nos dan.
+// Sustituimos `paginaauto` por el DB real extraído de DATABASE_URL.
+let DB = process.env.DB_NAME || 'paginaauto';
+if (process.env.DATABASE_URL) {
+  try {
+    const u = new URL(process.env.DATABASE_URL);
+    const dbFromUrl = u.pathname.replace(/^\//, '');
+    if (dbFromUrl) DB = dbFromUrl;
+  } catch {}
+  // Quita CREATE DATABASE/USE — no tenemos privilegios en cloud.
+  sql = sql
+    .replace(/CREATE\s+DATABASE[^;]*;/gi, '')
+    .replace(/USE\s+[^;]+;/gi, '');
+}
+
+function connConfig() {
+  if (process.env.DATABASE_URL) {
+    const u = new URL(process.env.DATABASE_URL);
+    const cfg = {
+      host: u.hostname,
+      port: Number(u.port || 3306),
+      user: decodeURIComponent(u.username),
+      password: decodeURIComponent(u.password || ''),
+      multipleStatements: true,
+    };
+    if (process.env.DB_DISABLE_SSL !== '1') cfg.ssl = { rejectUnauthorized: false };
+    return cfg;
+  }
+  return {
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    multipleStatements: true,
+  };
+}
+const cfg = connConfig();
+if (process.env.DATABASE_URL) cfg.database = DB; // forzar la DB cloud
+const conn = await mysql.createConnection(cfg);
 
 await conn.query(sql);
-
-const DB = process.env.DB_NAME || 'paginaauto';
 
 // Migraciones idempotentes (añade columnas si previews ya existía).
 async function addColIfMissing(table, ddl) {
