@@ -1,0 +1,62 @@
+==========================================================
+  INSTRUCCIONES PARA EL CLIENTE
+  Cómo conectar tu web para que detectemos sus errores
+==========================================================
+
+PASO 1 — Copia el archivo "error_capture.js" a tu web
+------------------------------------------------------
+Pega el archivo "error_capture.js" en la carpeta de tu web
+(por ejemplo, junto a tu index.html o en /js/).
+
+
+PASO 2 — Añade ESTE bloque en el <head> de tu HTML
+------------------------------------------------------
+Pégalo lo más arriba posible, ANTES de cualquier otro
+<script> de tu web. Cambia "mi-web" por el nombre que
+quieras que aparezca en el panel.
+
+  <script>
+    window.APP_NAME = 'mi-web';
+    window.APP_RELEASE = '1.0.0';
+  </script>
+  <script src="error_capture.js"
+          data-endpoint="http://IP-DEL-SERVIDOR:8000"></script>
+
+
+PASO 3 — Ajusta el endpoint
+------------------------------------------------------
+En "data-endpoint" pon la dirección donde está corriendo
+el orquestador (main.py):
+
+  - En local / pruebas:   http://127.0.0.1:8000
+  - En la misma red:      http://192.168.x.x:8000
+  - En producción:        http://tu-dominio.com:8000
+
+
+PASO 4 — Listo
+------------------------------------------------------
+Con eso ya se capturan automáticamente:
+
+  • Errores de JavaScript
+  • Promesas rechazadas (unhandledrejection)
+  • Recursos que no cargan (img, script, css 404)
+  • Llamadas fetch que fallan o devuelven error
+  • CSS inválido
+
+Aparecerás en "Clientes conectados" del panel y los
+errores llegarán solos.
+
+
+EXTRA — Reportar un error a mano desde tu código
+------------------------------------------------------
+Si quieres avisar de algo concreto tú mismo:
+
+  window.AVISOS_REPORTAR('algo raro paso', { detalle: 123 });
+
+
+NOTAS
+------------------------------------------------------
+- No hace falta token. Déjalo sin "data-token".
+- El script no rompe tu web: si el servidor está caído,
+  guarda los errores y los reenvía cuando vuelva.
+- Si tu web es HTTPS, el endpoint también debe ser HTTPS.
